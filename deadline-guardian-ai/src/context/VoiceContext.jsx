@@ -39,7 +39,7 @@ const RESET_MS = 2600;
 export function VoiceProvider({ children }) {
   const navigate = useNavigate();
   const location = useLocation();
-  const { tasks, addTaskWithAnalysis, toggleTask, showToast } = useApp();
+  const { tasks, addTaskWithAnalysis, toggleTask, showToast, preferences } = useApp();
 
   const [supported] = useState(() => isVoiceSupported());
   const [status, setStatus] = useState('idle'); // idle | listening | processing | success | error
@@ -51,8 +51,9 @@ export function VoiceProvider({ children }) {
   // phrase still produces a new reference and re-triggers the consumer effect.
   const [assistantDraft, setAssistantDraftState] = useState(null);
   // When true, a captured voice question is sent automatically; otherwise it
-  // just fills the input and waits for the user to press send. Default: fill-only.
-  const [voiceAutoSend] = useState(false);
+  // just fills the input and waits for the user to press send. Driven by the
+  // user's saved preference (Topbar profile menu), defaulting to fill-only.
+  const voiceAutoSend = preferences?.voiceAutoSend === true;
 
   const resetTimer = useRef(null);
   const finalHandled = useRef(false);

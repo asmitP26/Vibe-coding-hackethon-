@@ -4,7 +4,6 @@ import { Send, Sparkles, Bot, User as UserIcon, Trash2 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import PageHeader from '../components/common/PageHeader';
 import Card from '../components/common/Card';
-import AIModeBadge from '../components/common/AIModeBadge';
 import MicButton from '../components/common/MicButton';
 import AssistantMessage from '../components/assistant/AssistantMessage';
 import { useApp } from '../context/AppContext';
@@ -79,18 +78,15 @@ export default function Assistant() {
   return (
     <div className="flex h-[calc(100vh-9rem)] flex-col lg:h-[calc(100vh-7rem)]">
       <PageHeader title="Productivity Copilot" subtitle="Ask anything about your tasks, plan, or deadlines.">
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={clearAssistantConversation}
-            className="chip text-slate-500 hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600"
-            title="Clear conversation"
-          >
-            <Trash2 className="h-3.5 w-3.5" />
-            Clear
-          </button>
-          <AIModeBadge />
-        </div>
+        <button
+          type="button"
+          onClick={clearAssistantConversation}
+          className="chip text-slate-500 hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600"
+          title="Clear conversation"
+        >
+          <Trash2 className="h-3.5 w-3.5" />
+          Clear
+        </button>
       </PageHeader>
 
       {/* Quick prompts */}

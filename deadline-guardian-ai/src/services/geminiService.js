@@ -126,19 +126,19 @@ if (typeof window !== 'undefined') {
 /** Shape returned by analyzeTask(). */
 export const TASK_ANALYSIS_SCHEMA = {
   taskId: 't1',
-  priorityScore: 96, // integer 0-100
+  priorityScore: 95, // integer 0-100
   riskLevel: 'critical', // "critical" | "high" | "attention" | "safe"
-  estimatedEffort: 8, // hours (decimals allowed)
-  recommendedStart: '2026-06-25T21:00:00', // local ISO datetime, or null
-  category: 'Hackathon', // a short, improved category label
-  reason: 'Highest-impact deadline with the most remaining effort - start now to avoid a crunch.',
-  nextBestAction: 'Open the repo and scaffold the core feature flow before anything else.',
-  reminderMessage: 'Heads up: your hackathon MVP is due tonight - start the core build now.',
+  estimatedEffort: 3, // hours (decimals allowed)
+  recommendedStart: '2026-06-28T18:00:00', // local ISO datetime, or null
+  category: 'Study', // a short, improved category label
+  reason: 'Your most urgent deadline tonight - a few focused hours now means you submit with time to spare.',
+  nextBestAction: 'Open the assignment and finish the SQL queries before anything else.',
+  reminderMessage: 'Heads up: your database assignment is due tonight - start the core work now.',
   suggestedSubtasks: [
-    'Define the MVP "done" criteria',
-    'Build the core feature flow',
-    'Polish the UI and fix bugs',
-    'Deploy and verify the submission',
+    'Finalize the schema & ER diagram',
+    'Write and test the SQL queries',
+    'Add the normalization write-up',
+    'Proofread and submit on the portal',
   ],
   // Reasonable assumptions made when input data was missing/ambiguous (else []).
   assumptions: ['Estimated effort inferred from the task scope; no explicit value was provided.'],
@@ -146,14 +146,14 @@ export const TASK_ANALYSIS_SCHEMA = {
 
 /** Shape returned by generateDailyPlan(). */
 export const DAILY_PLAN_SCHEMA = {
-  date: '2026-06-25', // YYYY-MM-DD
+  date: '2026-06-28', // YYYY-MM-DD
   summary: 'Your toughest task is scheduled first while energy is high, with breaks to stay fresh.',
   focusHours: 6.5,
   // type: "focus" | "work" | "habit" | "meeting" | "break"; times are 24h "HH:MM".
   blocks: [
-    { id: 'gen-t1', taskId: 't1', title: 'Deep Work - Hackathon MVP core', start: '09:00', end: '11:00', type: 'focus' },
-    { id: 'gen-break-1', taskId: null, title: 'Short break', start: '11:00', end: '11:15', type: 'break' },
-    { id: 'gen-t2', taskId: 't2', title: 'Write README & Google Doc', start: '11:15', end: '12:15', type: 'work' },
+    { id: 'gen-t1', taskId: 't1', title: 'Deep Work - Database assignment', start: '09:30', end: '11:30', type: 'focus' },
+    { id: 'gen-break-1', taskId: null, title: 'Short break', start: '11:30', end: '11:45', type: 'break' },
+    { id: 'gen-t3', taskId: 't3', title: 'Technical interview prep', start: '11:45', end: '12:45', type: 'work' },
   ],
   // Reasonable assumptions made when input data was missing/ambiguous (else []).
   assumptions: ['Assumed a 09:00-22:00 availability window since none was specified.'],
@@ -163,11 +163,11 @@ export const DAILY_PLAN_SCHEMA = {
 export const TASK_BREAKDOWN_SCHEMA = {
   taskId: 't1',
   subtasks: [
-    { title: 'Set up project structure & routing', estimatedEffort: 0.5 },
-    { title: 'Build the core feature flow', estimatedEffort: 3 },
-    { title: 'Polish UI and responsiveness', estimatedEffort: 2 },
-    { title: 'Test end-to-end & fix bugs', estimatedEffort: 1.5 },
-    { title: 'Deploy and verify submission', estimatedEffort: 1 },
+    { title: 'Finalize the schema & ER diagram', estimatedEffort: 0.5 },
+    { title: 'Write the SQL queries', estimatedEffort: 1 },
+    { title: 'Test queries against sample data', estimatedEffort: 0.5 },
+    { title: 'Add the normalization write-up', estimatedEffort: 0.5 },
+    { title: 'Proofread and submit on the portal', estimatedEffort: 0.5 },
   ],
   // Reasonable assumptions made when input data was missing/ambiguous (else []).
   assumptions: ['Per-step effort estimated from the task scope; no historical data was given.'],
@@ -196,9 +196,9 @@ export const PRODUCTIVITY_COACH_SCHEMA = {
   focusRecommendation: 'Protect one 2-hour distraction-free block each evening to de-risk deadlines.',
   // tone: "critical" | "high" | "attention" | "safe"
   recommendations: [
-    { id: 'rec-1', emoji: '\u{1F680}', title: 'Start the MVP build now', detail: "It's your highest-risk deadline tonight - begin with the core feature.", tone: 'critical' },
-    { id: 'rec-2', emoji: '\u{1F9E0}', title: 'Protect a 2-hour focus block', detail: 'Reserve distraction-free time to de-risk the MVP deadline.', tone: 'high' },
-    { id: 'rec-3', emoji: '\u{1F525}', title: 'Keep your 12-day DSA streak alive', detail: 'A short practice set tonight maintains momentum.', tone: 'safe' },
+    { id: 'rec-1', emoji: '\u{1F4DD}', title: 'Submit the database assignment tonight', detail: "It's your highest-risk deadline tonight - start with the SQL queries.", tone: 'critical' },
+    { id: 'rec-2', emoji: '\u{1F9E0}', title: 'Protect a 2-hour focus block', detail: 'Reserve distraction-free time to de-risk your nearest deadline.', tone: 'high' },
+    { id: 'rec-3', emoji: '\u{1F525}', title: 'Keep your 12-day DSA streak alive', detail: 'A short practice set today maintains momentum.', tone: 'safe' },
   ],
   strengths: ['Consistent daily habits', 'High completion rate'],
   improvements: ['Reduce last-minute crunches', 'Batch quick admin tasks'],

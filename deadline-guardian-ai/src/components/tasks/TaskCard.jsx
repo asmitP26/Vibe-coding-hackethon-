@@ -1,11 +1,11 @@
 import { AnimatePresence, motion } from 'framer-motion';
-import { Clock, Gauge, Sparkles, Check, ChevronDown, Target, Bell, ListChecks, Loader2, RefreshCw } from 'lucide-react';
+import { Clock, Gauge, Sparkles, Check, ChevronDown, Target, Bell, ListChecks, Loader2, RefreshCw, AlarmClock, X, Pencil } from 'lucide-react';
 import { useState, memo } from 'react';
 import Badge from '../common/Badge';
 import { cn } from '../../lib/cn';
 import { getRiskMeta, getStatusMeta } from '../../utils/uiMeta';
 import { resolveScore, resolveRisk, subtaskDone, taskProgress, calculatePriorityScore, getRiskLevel } from '../../services/taskEngine';
-import { formatDeadline, relativeDeadline, isOverdue, timeAgo } from '../../utils/dateUtils';
+import { formatDeadline, relativeDeadline, isOverdue, timeAgo, formatReminderLabel, toDateTimeLocalValue, isoFromDateTimeLocal } from '../../utils/dateUtils';
 import { useApp } from '../../context/AppContext';
 import { analyzeTask, breakDownTask, getAIMode } from '../../services/geminiService';
 
@@ -20,10 +20,12 @@ function formatMinutes(min) {
 }
 
 function TaskCard({ task, onToggle, onToggleSubtask }) {
-  const { applyBreakdown, updateTask, showToast } = useApp();
+  const { applyBreakdown, updateTask, showToast, setTaskReminder } = useApp();
   const [open, setOpen] = useState(false);
   const [breaking, setBreaking] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [reminderEditing, setReminderEditing] = useState(false);
+  const [reminderInput, setReminderInput] = useState('');
 
   const risk = getRiskMeta(resolveRisk(task));
   const status = getStatusMeta(task.status);
@@ -33,6 +35,37 @@ function TaskCard({ task, onToggle, onToggleSubtask }) {
   const subtasks = task.subtasks || [];
   const doneSub = subtasks.filter(subtaskDone).length;
   const progress = taskProgress(task);
+
+  const hasReminder = task.reminderEnabled && !!task.reminderAt;
+
+  // Open the inline editor seeded with the current reminder (or a default of
+  // one hour from now / the deadline) expressed in local wall-clock time.
+  function openReminderEditor() {
+    const seed = task.reminderAt
+      ? task.reminderAt
+      : task.deadline
+        ? new Date(task.deadline)
+        : Date.now() + 60 * 60 * 1000;
+    setReminderInput(toDateTimeLocalValue(seed));
+    setReminderEditing(true);
+  }
+
+  function saveReminder() {
+    const iso = isoFromDateTimeLocal(reminderInput);
+    if (!iso) {
+      showToast('Pick a valid date & time for the reminder.', 'warning');
+      return;
+    }
+    setTaskReminder(task.id, { reminderAt: iso, reminderEnabled: true });
+    setReminderEditing(false);
+    showToast('Reminder set \u23f0', 'success');
+  }
+
+  function removeReminder() {
+    setTaskReminder(task.id, { reminderAt: null, reminderEnabled: false });
+    setReminderEditing(false);
+    showToast('Reminder removed', 'info');
+  }
 
   async function handleBreakDown() {
     if (breaking) return;
@@ -175,6 +208,74 @@ function TaskCard({ task, onToggle, onToggleSubtask }) {
               </span>
             )}
           </div>
+
+          {/* Reminder / alarm */}
+          {!reminderEditing ? (
+            <div className="mt-2.5">
+              {hasReminder ? (
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-brand-50 px-2.5 py-1 text-[11px] font-semibold text-brand-700 ring-1 ring-brand-100">
+                  <AlarmClock className="h-3.5 w-3.5 text-brand-500" />
+                  Reminder {formatReminderLabel(task.reminderAt)}
+                  {task.reminderTriggered && <span className="font-medium text-brand-400">· sent</span>}
+                  <button
+                    type="button"
+                    onClick={openReminderEditor}
+                    aria-label="Edit reminder"
+                    title="Edit reminder"
+                    className="ml-0.5 grid h-4 w-4 place-items-center rounded text-brand-400 transition-colors hover:text-brand-700"
+                  >
+                    <Pencil className="h-3 w-3" />
+                  </button>
+                </span>
+              ) : (
+                <button
+                  type="button"
+                  onClick={openReminderEditor}
+                  className="inline-flex items-center gap-1.5 rounded-full border border-dashed border-slate-200 px-2.5 py-1 text-[11px] font-semibold text-slate-500 transition-colors hover:border-brand-300 hover:text-brand-600"
+                >
+                  <AlarmClock className="h-3.5 w-3.5" /> Set reminder
+                </button>
+              )}
+            </div>
+          ) : (
+            <div className="mt-2.5 rounded-xl border border-slate-200 bg-slate-50/70 p-2.5">
+              <label className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold text-slate-600">
+                <AlarmClock className="h-3.5 w-3.5 text-brand-500" /> Remind me at
+              </label>
+              <input
+                type="datetime-local"
+                value={reminderInput}
+                onChange={(e) => setReminderInput(e.target.value)}
+                className="input"
+                aria-label="Reminder time"
+              />
+              <div className="mt-2 flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={saveReminder}
+                  className="inline-flex items-center gap-1 rounded-lg bg-brand-500 px-2.5 py-1 text-xs font-semibold text-white transition-colors hover:bg-brand-600"
+                >
+                  <Check className="h-3.5 w-3.5" /> Save
+                </button>
+                {hasReminder && (
+                  <button
+                    type="button"
+                    onClick={removeReminder}
+                    className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1 text-xs font-semibold text-red-500 transition-colors hover:bg-red-50"
+                  >
+                    <X className="h-3.5 w-3.5" /> Remove
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setReminderEditing(false)}
+                  className="ml-auto rounded-lg px-2.5 py-1 text-xs font-semibold text-slate-500 transition-colors hover:bg-slate-100"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* AI reason */}
           <div className="mt-3 flex items-start gap-2 rounded-xl bg-brand-50/70 px-3 py-2 text-xs text-brand-800">

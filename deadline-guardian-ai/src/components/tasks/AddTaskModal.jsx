@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { AnimatePresence, motion } from 'framer-motion';
-import { X, Plus, Sparkles, Loader2, Calendar, Clock, Flag, Tag, FileText } from 'lucide-react';
+import { X, Plus, Sparkles, Loader2, Calendar, Clock, Flag, Tag, FileText, AlarmClock } from 'lucide-react';
 import Button from '../common/Button';
 import AIModeBadge from '../common/AIModeBadge';
 import { useApp } from '../../context/AppContext';
 import { analyzeTask, getAIMode } from '../../services/geminiService';
 import { calculatePriorityScore, getRiskLevel } from '../../services/taskEngine';
+import { toDateTimeLocalValue, isoFromDateTimeLocal } from '../../utils/dateUtils';
 import { cn } from '../../lib/cn';
 
 const IMPORTANCE = [
@@ -15,7 +16,7 @@ const IMPORTANCE = [
   { label: 'High', value: 5 },
 ];
 
-const CATEGORIES = ['Inbox', 'Hackathon', 'Career', 'Study', 'Personal', 'Work', 'Health'];
+const CATEGORIES = ['Inbox', 'Study', 'Career', 'Work', 'Personal', 'Health', 'Learning', 'Habit'];
 
 const EMPTY = {
   title: '',
@@ -24,6 +25,8 @@ const EMPTY = {
   estimatedEffort: 1,
   importance: 3,
   category: 'Inbox',
+  reminderEnabled: false,
+  reminderAt: '',
 };
 
 /**
@@ -32,21 +35,22 @@ const EMPTY = {
  * it to global state. Shows an "AI is analyzing..." state during the call and
  * falls back to the local task engine if the AI layer ever throws.
  */
-export default function AddTaskModal({ open, onClose }) {
+export default function AddTaskModal({ open, onClose, initialTitle = '' }) {
   const { addTaskWithAnalysis, showToast } = useApp();
   const [form, setForm] = useState(EMPTY);
   const [analyzing, setAnalyzing] = useState(false);
   const titleRef = useRef(null);
   const live = getAIMode() === 'live';
 
-  // Reset the form and focus the title each time the modal opens.
+  // Reset the form and focus the title each time the modal opens. When opened
+  // from a suggestion chip, the title is pre-seeded so the user can tweak it.
   useEffect(() => {
     if (!open) return;
-    setForm(EMPTY);
+    setForm({ ...EMPTY, title: initialTitle || '' });
     setAnalyzing(false);
     const t = setTimeout(() => titleRef.current?.focus(), 60);
     return () => clearTimeout(t);
-  }, [open]);
+  }, [open, initialTitle]);
 
   // Close on Escape (unless mid-analysis).
   useEffect(() => {
@@ -62,6 +66,20 @@ export default function AddTaskModal({ open, onClose }) {
     setForm((f) => ({ ...f, [field]: value }));
   }
 
+  // Toggle the reminder on/off. When switching on with no time chosen yet,
+  // prefill a sensible default (the deadline if set, otherwise one hour out).
+  function toggleReminder(enabled) {
+    setForm((f) => {
+      if (!enabled) return { ...f, reminderEnabled: false };
+      let next = f.reminderAt;
+      if (!next) {
+        const seed = f.deadline ? new Date(f.deadline) : new Date(Date.now() + 60 * 60 * 1000);
+        next = Number.isNaN(seed.getTime()) ? toDateTimeLocalValue(Date.now() + 60 * 60 * 1000) : toDateTimeLocalValue(seed);
+      }
+      return { ...f, reminderEnabled: true, reminderAt: next };
+    });
+  }
+
   async function handleSubmit(e) {
     e.preventDefault();
     const title = form.title.trim();
@@ -75,6 +93,9 @@ export default function AddTaskModal({ open, onClose }) {
       importance: Number(form.importance) || 3,
       category: form.category || 'Inbox',
       status: 'todo',
+      reminderEnabled: !!(form.reminderEnabled && form.reminderAt),
+      reminderAt: form.reminderEnabled && form.reminderAt ? isoFromDateTimeLocal(form.reminderAt) : null,
+      reminderTriggered: false,
     };
 
     setAnalyzing(true);
@@ -251,6 +272,55 @@ export default function AddTaskModal({ open, onClose }) {
                     ))}
                   </select>
                 </div>
+              </div>
+
+              {/* Reminder / alarm */}
+              <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-3">
+                <div className="flex items-center justify-between gap-3">
+                  <span className="flex items-center gap-1.5 text-xs font-semibold text-slate-600">
+                    <AlarmClock className="h-3.5 w-3.5" /> Set a reminder
+                  </span>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={form.reminderEnabled}
+                    aria-label="Set a reminder"
+                    onClick={() => toggleReminder(!form.reminderEnabled)}
+                    className={cn(
+                      'relative h-6 w-11 shrink-0 rounded-full transition-colors',
+                      form.reminderEnabled ? 'bg-brand-500' : 'bg-slate-300',
+                    )}
+                  >
+                    <span
+                      className={cn(
+                        'absolute top-0.5 h-5 w-5 rounded-full bg-white shadow-sm transition-transform',
+                        form.reminderEnabled ? 'left-0.5 translate-x-5' : 'left-0.5 translate-x-0',
+                      )}
+                    />
+                  </button>
+                </div>
+                <AnimatePresence initial={false}>
+                  {form.reminderEnabled && (
+                    <motion.div
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: 'auto' }}
+                      exit={{ opacity: 0, height: 0 }}
+                      transition={{ duration: 0.18 }}
+                      className="overflow-hidden"
+                    >
+                      <input
+                        type="datetime-local"
+                        value={form.reminderAt}
+                        onChange={(e) => update('reminderAt', e.target.value)}
+                        className="input mt-3"
+                        aria-label="Reminder time"
+                      />
+                      <p className="mt-1.5 text-[11px] text-slate-400">
+                        You&apos;ll get an alert here while the app is open.
+                      </p>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
               </div>
 
               {/* Footer */}

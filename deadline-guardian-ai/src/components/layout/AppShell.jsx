@@ -7,10 +7,16 @@ import FloatingAssistant from '../assistant/FloatingAssistant';
 import Toast from '../common/Toast';
 import VoiceOverlay from '../common/VoiceOverlay';
 import ErrorBoundary from '../common/ErrorBoundary';
+import OnboardingModal from '../onboarding/OnboardingModal';
 import { VoiceProvider } from '../../context/VoiceContext';
+import { useReminderEngine } from '../../hooks/useReminderEngine';
 
 export default function AppShell() {
   const location = useLocation();
+
+  // Poll for due task reminders while the app is open (fires sound + toast +
+  // desktop notification + adds them to the notifications panel).
+  useReminderEngine();
 
   return (
     <VoiceProvider>
@@ -42,6 +48,7 @@ export default function AppShell() {
         <FloatingAssistant />
         <Toast />
         <VoiceOverlay />
+        <OnboardingModal />
       </div>
     </VoiceProvider>
   );

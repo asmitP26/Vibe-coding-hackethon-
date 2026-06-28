@@ -216,9 +216,7 @@ export default function Insights() {
 
   return (
     <div>
-      <PageHeader title="Insights" subtitle="Personalized analysis of how you actually work.">
-        <AIModeBadge />
-      </PageHeader>
+      <PageHeader title="Insights" subtitle="Personalized analysis of how you actually work." />
 
       {/* Key metrics with progress indicators */}
       <motion.div

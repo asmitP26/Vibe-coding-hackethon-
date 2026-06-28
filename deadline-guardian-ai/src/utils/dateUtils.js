@@ -134,3 +134,42 @@ export function getWeekDays(value = new Date()) {
   const start = startOfWeek(value);
   return Array.from({ length: 7 }, (_, i) => addDays(start, i));
 }
+
+/**
+ * Convert a date / ISO value to a `<input type="datetime-local">` value string
+ * ("YYYY-MM-DDTHH:mm") in LOCAL wall-clock time. Returns '' for invalid input.
+ */
+export function toDateTimeLocalValue(value) {
+  const d = toDate(value);
+  if (Number.isNaN(d.getTime())) return '';
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(
+    d.getMinutes(),
+  )}`;
+}
+
+/**
+ * Convert a `datetime-local` input value (local wall time) to a full ISO string.
+ * Returns null for an empty or unparseable value.
+ */
+export function isoFromDateTimeLocal(local) {
+  if (!local) return null;
+  const d = new Date(local); // datetime-local has no zone -> parsed as local time
+  return Number.isNaN(d.getTime()) ? null : d.toISOString();
+}
+
+/**
+ * Friendly label for a reminder time, e.g. "today at 4:00 PM",
+ * "tomorrow at 9:00 AM", or "Jun 30 at 9:00 AM". Safe for null/invalid input.
+ */
+export function formatReminderLabel(value) {
+  if (value == null) return '';
+  const d = toDate(value);
+  if (Number.isNaN(d.getTime())) return '';
+  const days = daysUntil(d);
+  const time = formatTime(d);
+  if (days === 0) return `today at ${time}`;
+  if (days === 1) return `tomorrow at ${time}`;
+  if (days === -1) return `yesterday at ${time}`;
+  return `${formatShortDate(d)} at ${time}`;
+}

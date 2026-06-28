@@ -12,10 +12,33 @@ const KEYS = {
   TASKS: 'dg.tasks.v1',
   HABITS: 'dg.habits.v1',
   ASSISTANT: 'deadlineGuardian.assistantMessages',
+  PREFERENCES: 'dg.preferences.v1',
+  ALERTS: 'dg.alerts.v1',
 };
 
 // Cap the persisted conversation so localStorage never grows unbounded.
 const MAX_ASSISTANT_MESSAGES = 50;
+
+/**
+ * User-editable profile + preferences, surfaced in the Topbar profile menu and
+ * persisted across refreshes. Only non-sensitive UI settings live here.
+ */
+export const DEFAULT_PREFERENCES = {
+  displayName: 'Asmit',
+  role: 'Student / Builder',
+  productivityStyle: 'Balanced',
+  usage: 'Mixed',
+  workStart: '09:00',
+  workEnd: '21:00',
+  focusDuration: 50,
+  remindersEnabled: true,
+  reminderSound: true,
+  voiceAutoSend: false,
+  onboarded: false,
+};
+
+// Read/dismiss bookkeeping for the notifications panel (alert ids are stable).
+const DEFAULT_ALERT_STATE = { read: [], dismissed: [] };
 
 function available() {
   try {
@@ -60,6 +83,30 @@ function write(key, value) {
   }
 }
 
+/**
+ * Read + validate a stored plain object. Returns `fallback` when the key is
+ * missing, the JSON is corrupted, or the parsed value is not a plain object.
+ */
+function readObject(key, fallback) {
+  if (!available()) return fallback;
+  let raw;
+  try {
+    raw = window.localStorage.getItem(key);
+  } catch {
+    return fallback;
+  }
+  if (raw == null) return fallback;
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed;
+    console.warn(`[storageService] "${key}" is not an object - restoring defaults.`);
+    return fallback;
+  } catch {
+    console.warn(`[storageService] "${key}" contains corrupted JSON - restoring defaults.`);
+    return fallback;
+  }
+}
+
 /** Always returns an array of tasks (stored value or mock fallback). Never null. */
 export function getTasks() {
   return readArray(KEYS.TASKS, mockTasks);
@@ -93,12 +140,46 @@ export function saveAssistantMessages(messages) {
   return write(KEYS.ASSISTANT, list.slice(-MAX_ASSISTANT_MESSAGES));
 }
 
+/**
+ * Profile + preferences. Always merged onto DEFAULT_PREFERENCES so a partial or
+ * older stored object can never leave a field undefined.
+ */
+export function getPreferences() {
+  return { ...DEFAULT_PREFERENCES, ...readObject(KEYS.PREFERENCES, {}) };
+}
+
+export function savePreferences(prefs) {
+  const merged = { ...DEFAULT_PREFERENCES, ...(prefs && typeof prefs === 'object' ? prefs : {}) };
+  return write(KEYS.PREFERENCES, merged);
+}
+
+/**
+ * Read/dismiss bookkeeping for the notifications panel. Returns an object with
+ * `read` and `dismissed` string-id arrays (never null/undefined).
+ */
+export function getAlertState() {
+  const stored = readObject(KEYS.ALERTS, DEFAULT_ALERT_STATE);
+  return {
+    read: Array.isArray(stored.read) ? stored.read : [],
+    dismissed: Array.isArray(stored.dismissed) ? stored.dismissed : [],
+  };
+}
+
+export function saveAlertState(state) {
+  return write(KEYS.ALERTS, {
+    read: Array.isArray(state?.read) ? state.read : [],
+    dismissed: Array.isArray(state?.dismissed) ? state.dismissed : [],
+  });
+}
+
 export function clearAll() {
   if (!available()) return;
   try {
     window.localStorage.removeItem(KEYS.TASKS);
     window.localStorage.removeItem(KEYS.HABITS);
     window.localStorage.removeItem(KEYS.ASSISTANT);
+    window.localStorage.removeItem(KEYS.PREFERENCES);
+    window.localStorage.removeItem(KEYS.ALERTS);
   } catch {
     /* ignore */
   }

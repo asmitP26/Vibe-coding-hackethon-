@@ -20,7 +20,7 @@ export default function DeadlineRiskCard() {
     <Card>
       <CardHeader
         icon={AlertTriangle}
-        title="Deadline Risk"
+        title="Smart Alerts"
         subtitle={`${atRisk.length} need attention`}
         iconClass="bg-red-50 text-red-600"
       />

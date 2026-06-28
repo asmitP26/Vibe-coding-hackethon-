@@ -16,7 +16,12 @@ import {
   saveHabits,
   getAssistantMessages,
   saveAssistantMessages,
+  getPreferences,
+  savePreferences,
+  resetToMockData,
+  saveAlertState,
 } from '../services/storageService';
+import { markReminderTriggered as applyReminderTriggered } from '../services/alarmService';
 
 const AppContext = createContext(null);
 
@@ -84,6 +89,10 @@ export function AppProvider({ children }) {
   const [tasks, setTasks] = useState(() => asArray(getTasks()));
   const [habits, setHabits] = useState(() => asArray(getHabits()));
 
+  // Bumped whenever demo data is reset, so independent consumers (e.g. the
+  // notification bell, which keeps its own alert state) can re-sync.
+  const [dataVersion, setDataVersion] = useState(0);
+
   useEffect(() => {
     saveTasks(tasks);
   }, [tasks]);
@@ -119,6 +128,20 @@ export function AppProvider({ children }) {
     setAssistantConversation([{ ...ASSISTANT_GREETING }]);
   }, []);
 
+  // User-editable profile + preferences (display name, work hours, focus length,
+  // reminder sound, voice auto-send). Persisted so they survive a refresh and
+  // shared app-wide (Topbar profile menu writes; VoiceContext reads autoSend).
+  const [preferences, setPreferences] = useState(() => getPreferences());
+
+  useEffect(() => {
+    savePreferences(preferences);
+  }, [preferences]);
+
+  /** Merge a partial patch into preferences (and persist via the effect above). */
+  const updatePreferences = useCallback((patch) => {
+    setPreferences((prev) => ({ ...prev, ...(patch && typeof patch === 'object' ? patch : {}) }));
+  }, []);
+
   const addTask = useCallback((partial) => {
     const newTask = {
       id: createId('t'),
@@ -131,6 +154,11 @@ export function AppProvider({ children }) {
       status: 'todo',
       tags: [],
       subtasks: [],
+      // Task reminder/alarm fields (see alarmService + useReminderEngine).
+      reminderAt: null,
+      reminderEnabled: false,
+      reminderTriggered: false,
+      reminderSnoozed: false,
       createdAt: new Date().toISOString(),
       ...partial,
     };
@@ -179,6 +207,45 @@ export function AppProvider({ children }) {
 
   const deleteTask = useCallback((id) => {
     setTasks((prev) => prev.filter((t) => t.id !== id));
+  }, []);
+
+  // --- Task reminders / alarms ------------------------------------------------
+  /**
+   * Set (or clear) a task's reminder. Passing reminderEnabled=false or a null
+   * time disarms it. Any change re-arms the alarm (reminderTriggered=false) so a
+   * rescheduled reminder can fire again.
+   */
+  const setTaskReminder = useCallback((taskId, { reminderAt = null, reminderEnabled = false } = {}) => {
+    setTasks((prev) =>
+      prev.map((t) =>
+        t.id === taskId
+          ? {
+              ...t,
+              reminderAt: reminderEnabled && reminderAt ? reminderAt : null,
+              reminderEnabled: !!(reminderEnabled && reminderAt),
+              reminderTriggered: false,
+              reminderSnoozed: false,
+            }
+          : t,
+      ),
+    );
+  }, []);
+
+  /** Push a task's reminder out by `minutes` and re-arm it (used by snooze). */
+  const snoozeReminder = useCallback((taskId, minutes = 10) => {
+    const next = new Date(Date.now() + minutes * 60000).toISOString();
+    setTasks((prev) =>
+      prev.map((t) =>
+        t.id === taskId
+          ? { ...t, reminderAt: next, reminderEnabled: true, reminderTriggered: false, reminderSnoozed: true }
+          : t,
+      ),
+    );
+  }, []);
+
+  /** Mark a task's reminder as fired so the engine never re-fires it. */
+  const markReminderTriggered = useCallback((taskId) => {
+    setTasks((prev) => applyReminderTriggered(prev, taskId));
   }, []);
 
   const toggleSubtask = useCallback((taskId, subtaskId) => {
@@ -257,16 +324,34 @@ export function AppProvider({ children }) {
     setToast(null);
   }, []);
 
-  const showToast = useCallback((message, tone = 'info') => {
+  const showToast = useCallback((message, tone = 'info', options = {}) => {
     if (!message) return;
     if (toastTimer.current) clearTimeout(toastTimer.current);
-    setToast({ id: Date.now(), message, tone });
-    toastTimer.current = setTimeout(() => setToast(null), 4000);
+    const { actions = null, duration } = options && typeof options === 'object' ? options : {};
+    const safeActions = Array.isArray(actions)
+      ? actions.filter((a) => a && typeof a.onClick === 'function' && a.label)
+      : null;
+    setToast({ id: Date.now(), message, tone, actions: safeActions });
+    // Toasts with actions linger a little longer so they can be clicked.
+    const ttl = Number.isFinite(duration) ? duration : safeActions?.length ? 9000 : 4000;
+    toastTimer.current = setTimeout(() => setToast(null), ttl);
   }, []);
 
   useEffect(() => () => {
     if (toastTimer.current) clearTimeout(toastTimer.current);
   }, []);
+
+  // Restore the original sample tasks, habits, reminders and a fresh assistant
+  // greeting - handy for live demos so judges can reset to a known-good state.
+  const resetDemoData = useCallback(() => {
+    const fresh = resetToMockData();
+    setTasks(asArray(fresh?.tasks));
+    setHabits(asArray(fresh?.habits));
+    saveAlertState({ read: [], dismissed: [] });
+    clearAssistantConversation();
+    setDataVersion((v) => v + 1);
+    showToast('Demo data restored - sample tasks, habits and reminders are back.', 'success');
+  }, [clearAssistantConversation, showToast]);
 
   const value = useMemo(
     () => ({
@@ -286,12 +371,18 @@ export function AppProvider({ children }) {
       assistantConversation: asArray(assistantConversation),
       appendAssistantMessages,
       clearAssistantConversation,
+      // user-editable, persisted preferences
+      preferences: asObject(preferences, {}),
+      updatePreferences,
       // actions
       addTask,
       addTaskWithAnalysis,
       updateTask,
       toggleTask,
       deleteTask,
+      setTaskReminder,
+      snoozeReminder,
+      markReminderTriggered,
       toggleSubtask,
       addSubtasks,
       applyBreakdown,
@@ -300,8 +391,11 @@ export function AppProvider({ children }) {
       toast,
       showToast,
       dismissToast,
+      // demo helpers
+      dataVersion,
+      resetDemoData,
     }),
-    [tasks, habits, addTask, addTaskWithAnalysis, updateTask, toggleTask, deleteTask, toggleSubtask, addSubtasks, applyBreakdown, toggleHabit, toast, showToast, dismissToast, assistantConversation, appendAssistantMessages, clearAssistantConversation],
+    [tasks, habits, addTask, addTaskWithAnalysis, updateTask, toggleTask, deleteTask, setTaskReminder, snoozeReminder, markReminderTriggered, toggleSubtask, addSubtasks, applyBreakdown, toggleHabit, toast, showToast, dismissToast, assistantConversation, appendAssistantMessages, clearAssistantConversation, preferences, updatePreferences, dataVersion, resetDemoData],
   );
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;

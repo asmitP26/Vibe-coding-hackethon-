@@ -8,6 +8,7 @@ import Tasks from './pages/Tasks';
 import Planner from './pages/Planner';
 import Habits from './pages/Habits';
 import Insights from './pages/Insights';
+import Reminders from './pages/Reminders';
 import Assistant from './pages/Assistant';
 
 export default function App() {
@@ -22,6 +23,7 @@ export default function App() {
             <Route path="/planner" element={<Planner />} />
             <Route path="/habits" element={<Habits />} />
             <Route path="/insights" element={<Insights />} />
+            <Route path="/reminders" element={<Reminders />} />
             <Route path="/assistant" element={<Assistant />} />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />

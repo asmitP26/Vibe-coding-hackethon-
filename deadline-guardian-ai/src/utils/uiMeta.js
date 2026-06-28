@@ -14,7 +14,7 @@ export const RISK_META = {
     soft: 'bg-red-50',
   },
   high: {
-    label: 'High Risk',
+    label: 'At Risk',
     badge: 'bg-orange-50 text-orange-600 ring-1 ring-orange-100',
     dot: 'bg-orange-500',
     bar: 'bg-orange-500',
@@ -22,7 +22,7 @@ export const RISK_META = {
     soft: 'bg-orange-50',
   },
   attention: {
-    label: 'Attention',
+    label: 'Needs Attention',
     badge: 'bg-amber-50 text-amber-600 ring-1 ring-amber-100',
     dot: 'bg-amber-500',
     bar: 'bg-amber-400',

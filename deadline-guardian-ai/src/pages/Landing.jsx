@@ -149,12 +149,12 @@ export default function Landing() {
                 </div>
               </div>
               <span className="rounded-full bg-red-500/20 px-3 py-1 text-xs font-semibold text-red-300">
-                Critical: Hackathon MVP
+                Critical: Database assignment
               </span>
             </div>
             <div className="grid gap-3 sm:grid-cols-3">
               {[
-                { k: 'Priority Score', v: '94', s: 'Hackathon MVP' },
+                { k: 'Priority Score', v: '95', s: 'Database assignment' },
                 { k: 'Focus Hours', v: '6.5h', s: 'planned today' },
                 { k: 'Completion', v: '78%', s: 'this week' },
               ].map((c) => (
@@ -241,7 +241,7 @@ export default function Landing() {
         <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-4 px-5 sm:flex-row">
           <Logo compact />
           <p className="text-xs text-slate-400">
-            Built for the hackathon · Deadline Guardian AI © {new Date().getFullYear()}
+            Your daily productivity companion · Deadline Guardian AI © {new Date().getFullYear()}
           </p>
         </div>
       </footer>

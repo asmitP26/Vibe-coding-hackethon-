@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Plus, ClipboardList, CheckCircle2, ShieldCheck, CalendarCheck } from 'lucide-react';
+import { Plus, CheckCircle2, ShieldCheck, CalendarCheck, CalendarClock } from 'lucide-react';
 import { motion } from 'framer-motion';
 import PageHeader from '../components/common/PageHeader';
 import Button from '../components/common/Button';
@@ -20,16 +20,28 @@ const FILTERS = [
 ];
 
 const EMPTY_COPY = {
-  all: { icon: ClipboardList, title: 'No tasks yet', description: 'Add your first task and let the AI prioritize it for you.' },
   today: { icon: CalendarCheck, title: 'Nothing due today', description: "You're all clear for today. Enjoy the breathing room." },
   critical: { icon: ShieldCheck, title: 'No tasks at risk', description: 'Nothing critical right now — you are nicely on track.' },
   completed: { icon: CheckCircle2, title: 'No completed tasks yet', description: 'Finish a task and it will show up here.' },
 };
 
+// Friendly starting points shown on a brand-new, empty task list.
+const SUGGESTIONS = ['Submit assignment', 'Prepare interview', 'Pay bill', 'Plan project'];
+
 export default function Tasks() {
   const { tasks, toggleTask, toggleSubtask } = useApp();
   const [filter, setFilter] = useState('all');
   const [showAdd, setShowAdd] = useState(false);
+  const [seedTitle, setSeedTitle] = useState('');
+
+  const openAdd = (title = '') => {
+    setSeedTitle(title);
+    setShowAdd(true);
+  };
+  const closeAdd = () => {
+    setShowAdd(false);
+    setSeedTitle('');
+  };
 
   const visible = useMemo(() => {
     const ranked = sortTasksByPriority(tasks);
@@ -58,7 +70,7 @@ export default function Tasks() {
   return (
     <div>
       <PageHeader title="Tasks" subtitle="AI-prioritized, risk-aware, and ready to tackle.">
-        <Button onClick={() => setShowAdd(true)}>
+        <Button onClick={() => openAdd()}>
           <Plus className="h-4 w-4" /> New Task
         </Button>
       </PageHeader>
@@ -82,16 +94,38 @@ export default function Tasks() {
       </div>
 
       {visible.length === 0 ? (
-        <EmptyState
-          icon={EMPTY_COPY[filter].icon}
-          title={EMPTY_COPY[filter].title}
-          description={EMPTY_COPY[filter].description}
-          action={
-            <Button onClick={() => setShowAdd(true)}>
-              <Plus className="h-4 w-4" /> Add a task
-            </Button>
-          }
-        />
+        filter === 'all' ? (
+          <EmptyState
+            icon={CalendarClock}
+            title="Add your first deadline"
+            description="Track anything with a due date and let the AI prioritize it. New here? Start with an example:"
+            action={
+              <div className="flex flex-col items-center gap-4">
+                <div className="flex flex-wrap justify-center gap-2">
+                  {SUGGESTIONS.map((s) => (
+                    <button key={s} type="button" onClick={() => openAdd(s)} className="chip">
+                      <Plus className="h-3.5 w-3.5" /> {s}
+                    </button>
+                  ))}
+                </div>
+                <Button onClick={() => openAdd()}>
+                  <Plus className="h-4 w-4" /> Add your first deadline
+                </Button>
+              </div>
+            }
+          />
+        ) : (
+          <EmptyState
+            icon={EMPTY_COPY[filter].icon}
+            title={EMPTY_COPY[filter].title}
+            description={EMPTY_COPY[filter].description}
+            action={
+              <Button onClick={() => openAdd()}>
+                <Plus className="h-4 w-4" /> Add a task
+              </Button>
+            }
+          />
+        )
       ) : (
         <motion.div
           variants={staggerContainer}
@@ -112,7 +146,7 @@ export default function Tasks() {
         </motion.div>
       )}
 
-      <AddTaskModal open={showAdd} onClose={() => setShowAdd(false)} />
+      <AddTaskModal open={showAdd} onClose={closeAdd} initialTitle={seedTitle} />
     </div>
   );
 }

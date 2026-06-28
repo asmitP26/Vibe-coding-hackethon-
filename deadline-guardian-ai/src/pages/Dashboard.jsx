@@ -4,13 +4,11 @@ import { getGreeting, weekdayLong, formatShortDate } from '../utils/dateUtils';
 import ErrorBoundary from '../components/common/ErrorBoundary';
 import DailyBriefCard from '../components/dashboard/DailyBriefCard';
 import TodaysFocusCard from '../components/dashboard/TodaysFocusCard';
-import QuickAddTask from '../components/dashboard/QuickAddTask';
 import TopPriorityTasks from '../components/dashboard/TopPriorityTasks';
 import DeadlineRiskCard from '../components/dashboard/DeadlineRiskCard';
 import ProductivityScoreCard from '../components/dashboard/ProductivityScoreCard';
 import CalendarPreviewCard from '../components/dashboard/CalendarPreviewCard';
 import HabitTrackerWidget from '../components/dashboard/HabitTrackerWidget';
-import RecommendationsCard from '../components/dashboard/RecommendationsCard';
 
 /**
  * Wrap a widget in a motion cell + isolated ErrorBoundary so one crash stays
@@ -74,21 +72,14 @@ export default function Dashboard() {
           <ProductivityScoreCard />
         </Widget>
 
-        <Widget label="Quick Add" index={4} className="lg:col-span-2">
-          <QuickAddTask />
-        </Widget>
-        <Widget label="Deadline Risk" index={5}>
-          <DeadlineRiskCard />
-        </Widget>
-
-        <Widget label="Top Priority Tasks" index={6}>
+        <Widget label="Top Priority Tasks" index={4}>
           <TopPriorityTasks />
         </Widget>
-        <Widget label="Habit Tracker" index={7}>
-          <HabitTrackerWidget />
+        <Widget label="Smart Alerts" index={5}>
+          <DeadlineRiskCard />
         </Widget>
-        <Widget label="Recommendations" index={8}>
-          <RecommendationsCard />
+        <Widget label="Habit Tracker" index={6}>
+          <HabitTrackerWidget />
         </Widget>
       </div>
     </div>

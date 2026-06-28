@@ -23,7 +23,7 @@
  *   - chat       : anything else                -> top priorities + a helpful nudge
  */
 import { sortTasksByPriority, resolveScore, resolveRisk } from './taskEngine';
-import { isOverdue, sameDay } from '../utils/dateUtils';
+import { isOverdue, sameDay, relativeDeadline } from '../utils/dateUtils';
 
 export const COPILOT_INTENTS = {
   NOW: 'now',
@@ -48,11 +48,6 @@ const effortOf = (task) => Math.max(0.25, Number(task?.estimatedEffort) || 0.5);
 const pad = (n) => String(n).padStart(2, '0');
 /** Decimal hours (e.g. 9.5) -> 24h "HH:MM" used by schedule cards. */
 const fmtHour = (h) => `${pad(Math.floor(h))}:${pad(Math.round((h - Math.floor(h)) * 60))}`;
-/** "HH:MM" -> decimal hours. */
-const parseHHMM = (s) => {
-  const [h, m] = String(s ?? '').split(':').map(Number);
-  return (Number.isFinite(h) ? h : 0) + (Number.isFinite(m) ? m : 0) / 60;
-};
 
 /** Current local time as decimal hours, from an optional ISO/Date input. */
 function nowDecimal(currentTime) {
@@ -141,53 +136,43 @@ function parseBudgetHours(message, fallback = 2) {
 }
 
 // ============================================================================
-// Schedule helpers.
-// ============================================================================
-/** The block happening right now, else the next upcoming block, else null. */
-function currentOrNextBlock(scheduleBlocks, nowDec) {
-  const blocks = asArray(scheduleBlocks).filter((b) => b && b.start && b.end);
-  const current = blocks.find((b) => parseHHMM(b.start) <= nowDec && nowDec < parseHHMM(b.end));
-  if (current) return { ...current, when: 'now' };
-  const upcoming = blocks
-    .filter((b) => parseHHMM(b.start) > nowDec)
-    .sort((a, b) => parseHHMM(a.start) - parseHHMM(b.start))[0];
-  return upcoming ? { ...upcoming, when: 'next' } : null;
-}
-
-// ============================================================================
 // Per-intent builders -> each returns { intent, reply, cards }.
 // ============================================================================
 
-/** "What should I do now?" -> current/next block, highest-priority task, next action. */
+/**
+ * "What should I do now?" -> a short, natural answer with ONE clear next action,
+ * why it matters, and an estimated time. No cards - a simple answer is enough.
+ */
 function buildNow(message, ctx) {
-  const nowDec = nowDecimal(ctx.currentTime);
   const ranked = sortTasksByPriority(activeTasks(ctx.tasks));
   const top = ranked[0] || null;
-  const block = currentOrNextBlock(ctx.scheduleBlocks, nowDec);
-  const action = top
-    ? top.nextBestAction || `Block focused time and start the hardest part of "${top.title}".`
-    : 'Take a breath - nothing is on fire. Pick one small win or rest.';
 
-  const cards = [{
-    type: 'focus',
-    title: 'Right now',
-    block: block
-      ? { title: block.title, start: block.start, end: block.end, type: block.type, when: block.when }
-      : null,
-    task: top ? { id: top.id, title: top.title, tone: resolveRisk(top), deadline: top.deadline || null } : null,
-    action,
-  }];
+  if (!top) {
+    return {
+      intent: COPILOT_INTENTS.NOW,
+      reply:
+        "You're all clear right now - nothing urgent on your plate. Take a breather, or pick one small win while you have the space \u{1F60C}",
+      cards: [],
+    };
+  }
 
-  const risks = tasksToRisks(ctx.tasks, 3).filter((r) => ['critical', 'high'].includes(r.tone));
-  if (risks.length) cards.push({ type: 'risks', items: risks });
+  const cap = (s) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : s);
+  const lower = (s) => (s ? s.charAt(0).toLowerCase() + s.slice(1) : s);
+  const withStop = (s) => (/[.!?]$/.test(String(s).trim()) ? String(s).trim() : `${String(s).trim()}.`);
 
-  return {
-    intent: COPILOT_INTENTS.NOW,
-    reply: top
-      ? "Here's where I'd point your energy right now \u{1F447}"
-      : "You're all clear right now - enjoy the breathing room \u{1F60C}",
-    cards,
-  };
+  const reason = top.aiReason
+    ? withStop(cap(top.aiReason))
+    : top.deadline
+      ? `It's your most time-sensitive deadline (${relativeDeadline(top.deadline)}).`
+      : "It's the highest-impact thing on your list right now.";
+  const time = hoursLabel(effortOf(top));
+  const step = withStop(lower(top.nextBestAction || 'start with the hardest part first'));
+
+  const reply =
+    `Focus on "${top.title}" next. ${reason} It should take about ${time}. ` +
+    `Next step: ${step}`;
+
+  return { intent: COPILOT_INTENTS.NOW, reply, cards: [] };
 }
 
 /** "Can I finish everything today?" -> feasibility verdict, time-vs-effort, at-risk tasks. */
