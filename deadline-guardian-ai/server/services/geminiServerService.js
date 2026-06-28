@@ -41,6 +41,16 @@ export function getGeminiModel() {
 // Back-compat export; some modules import GEMINI_MODEL directly.
 export const GEMINI_MODEL = getGeminiModel();
 
+// When the configured/default model returns 404 for the caller's key, we
+// auto-discover a working model (via ListModels) and cache it here for the rest
+// of the process so the discovery only happens once.
+let resolvedModel = null;
+
+/** The model actually in use: an auto-resolved one (after a 404) or the configured/default. */
+export function getActiveModel() {
+  return resolvedModel || getGeminiModel();
+}
+
 /** Read the key fresh each call so env changes are picked up without caching. */
 function getApiKey() {
   const key = process.env.GEMINI_API_KEY;
@@ -96,7 +106,7 @@ export function getGeminiHealth() {
   return {
     configured: isGeminiConfigured(),
     mode: getAIMode(),
-    model: getGeminiModel(),
+    model: getActiveModel(),
     lastOk: geminiHealth.lastOk,
     lastError: geminiHealth.lastError,
     lastCheckedAt: geminiHealth.lastCheckedAt,
@@ -385,14 +395,12 @@ const diffHours = (start, end) => {
 };
 
 /**
- * Low-level Gemini REST call. Returns the raw model text (expected to be JSON).
- * Throws on network / HTTP errors so the caller can fall back gracefully.
+ * Build the request init for a single generateContent call.
  * SECURITY_NOTE: the key is sent only in the server->Google request header and
  * is never logged or returned to the client.
  */
-async function callGemini(prompt, signal) {
-  const model = getGeminiModel();
-  const res = await fetch(`${GEMINI_API_BASE}/models/${model}:generateContent`, {
+function generateContentInit(prompt, signal) {
+  return {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -403,7 +411,92 @@ async function callGemini(prompt, signal) {
       generationConfig: { responseMimeType: 'application/json', temperature: 0.4 },
     }),
     signal,
+  };
+}
+
+/**
+ * List the model names (without the "models/" prefix) that THIS API key can use
+ * for generateContent. This is the authoritative way to learn which model
+ * strings are valid for the caller's key / region / API version, and is what we
+ * use to auto-recover from a 404 "model not found" error.
+ */
+async function listGenerateContentModels(signal) {
+  const res = await fetch(`${GEMINI_API_BASE}/models`, {
+    method: 'GET',
+    headers: { 'x-goog-api-key': getApiKey() }, // server-only; never logged
+    signal,
   });
+  if (!res.ok) {
+    let detail = '';
+    try {
+      const errBody = await res.json();
+      detail = errBody?.error?.message || errBody?.error?.status || '';
+    } catch {
+      /* not JSON */
+    }
+    throw new Error(`ListModels failed: ${res.status} ${res.statusText}${detail ? ` - ${detail}` : ''}`);
+  }
+  const data = await res.json();
+  const models = Array.isArray(data?.models) ? data.models : [];
+  return models
+    .filter((m) => Array.isArray(m?.supportedGenerationMethods) && m.supportedGenerationMethods.includes('generateContent'))
+    .map((m) => (typeof m?.name === 'string' ? m.name.replace(/^models\//, '') : ''))
+    .filter(Boolean);
+}
+
+/**
+ * From the list of available model names, pick the best default: prefer fast,
+ * current "flash" text models; never auto-select embedding / vision / tts /
+ * audio / image variants even if they happen to expose generateContent.
+ */
+function pickBestModel(names) {
+  const score = (n) => {
+    const s = n.toLowerCase();
+    let pts = 0;
+    if (s.includes('flash')) pts += 100;
+    if (s.includes('2.5')) pts += 40;
+    else if (s.includes('2.0')) pts += 30;
+    else if (s.includes('1.5')) pts += 10;
+    if (s.includes('latest')) pts += 5;
+    if (s.includes('pro')) pts += 15; // capable, just slower than flash
+    if (s.includes('lite')) pts -= 3; // cheaper but weaker; prefer full flash
+    if (s.includes('thinking') || s.includes('exp') || s.includes('preview')) pts -= 8;
+    if (/(embedding|vision|aqa|image|imagen|tts|audio|veo)/.test(s)) pts -= 500;
+    return pts;
+  };
+  return [...names].sort((a, b) => score(b) - score(a))[0] || null;
+}
+
+/**
+ * Low-level Gemini REST call. Returns the raw model text (expected to be JSON).
+ * Throws on network / HTTP errors so the caller can fall back gracefully.
+ *
+ * SELF-HEALING: if the configured model returns 404 ("model not found"), we ask
+ * Google which models this key can actually use, switch to the best one, cache
+ * it for the rest of the process, and retry once. This fixes the common
+ * "Gemini request failed: 404 Not Found" loop caused by a model name that is not
+ * available for the caller's key / region / API version.
+ */
+async function callGemini(prompt, signal) {
+  const requested = getActiveModel();
+  let usedModel = requested;
+  let res = await fetch(`${GEMINI_API_BASE}/models/${requested}:generateContent`, generateContentInit(prompt, signal));
+
+  if (res.status === 404) {
+    let discovered = null;
+    try {
+      const available = await listGenerateContentModels(signal);
+      discovered = pickBestModel(available);
+    } catch (listErr) {
+      console.warn(`[geminiServerService] Could not list models after 404: ${listErr?.message || 'unknown error'}`);
+    }
+    if (discovered && discovered !== requested) {
+      console.warn(`[geminiServerService] Model "${requested}" returned 404; auto-switching to "${discovered}" (discovered via ListModels). Set GEMINI_MODEL=${discovered} in .env to silence this.`);
+      resolvedModel = discovered;
+      usedModel = discovered;
+      res = await fetch(`${GEMINI_API_BASE}/models/${discovered}:generateContent`, generateContentInit(prompt, signal));
+    }
+  }
 
   if (!res.ok) {
     // Surface the real reason (status + Google's message + model) so a wrong
@@ -417,7 +510,7 @@ async function callGemini(prompt, signal) {
       /* body was not JSON; keep status text only */
     }
     const suffix = detail ? ` - ${detail}` : '';
-    throw new Error(`Gemini request failed: ${res.status} ${res.statusText} [model=${model}]${suffix}`);
+    throw new Error(`Gemini request failed: ${res.status} ${res.statusText} [model=${usedModel}]${suffix}`);
   }
 
   const data = await res.json();
@@ -475,12 +568,11 @@ export async function generateJSON(prompt, fallbackData) {
  * @returns {Promise<{ ok: boolean, mode: string, model: string, response?: any, error?: string }>}
  */
 export async function runGeminiTest() {
-  const model = getGeminiModel();
   if (!isGeminiConfigured()) {
     return {
       ok: false,
       mode: 'mock',
-      model,
+      model: getActiveModel(),
       error: 'No GEMINI_API_KEY configured on the server (running in mock mode).',
     };
   }
@@ -493,16 +585,26 @@ export async function runGeminiTest() {
     const parsed = safeParseJSON(text, null);
     if (parsed == null) {
       recordGeminiFailure('Gemini returned unparseable or empty JSON');
-      return { ok: false, mode: 'mock', model, error: 'Gemini returned unparseable or empty JSON.' };
+      return { ok: false, mode: 'mock', model: getActiveModel(), error: 'Gemini returned unparseable or empty JSON.' };
     }
     recordGeminiSuccess();
-    return { ok: true, mode: 'live', model, response: parsed };
+    // getActiveModel() reflects any model auto-resolved during the call above.
+    return { ok: true, mode: 'live', model: getActiveModel(), response: parsed };
   } catch (error) {
     const message = error?.name === 'AbortError'
       ? `Gemini request timed out after ${REQUEST_TIMEOUT_MS}ms`
       : (error?.message || 'unknown error');
     recordGeminiFailure(message);
-    return { ok: false, mode: 'mock', model, error: message };
+    const result = { ok: false, mode: 'mock', model: getActiveModel(), error: message };
+    // Best-effort: tell the user which models their key CAN use, so they can set
+    // GEMINI_MODEL correctly. Never throws and never logs the key.
+    try {
+      const available = await listGenerateContentModels();
+      if (available.length) result.availableModels = available;
+    } catch {
+      /* discovery failed too; the error message above is still actionable */
+    }
+    return result;
   } finally {
     clearTimeout(timer);
   }
