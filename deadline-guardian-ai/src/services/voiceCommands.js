@@ -2,11 +2,14 @@
  * voiceCommands - a lightweight, dependency-free "NLP" layer that turns a
  * spoken transcript into an app action.
  *
- *   parseVoiceCommand(text)  ->  { intent, title, raw }
+ *   parseVoiceCommand(text)  ->  { type, intent, action, text, title, raw, confidence }
  *   executeVoiceCommand(parsed, deps)  ->  Promise<{ ok, message, tone }>
  *
  * The parser uses simple keyword/regex matching (add / complete / break /
  * reschedule / show / plan / what-now) and extracts a task title when present.
+ * It classifies each transcript as a "command" (a concrete app action) or
+ * "text" (natural language for the Copilot). Text is routed into the Assistant
+ * input by the caller instead of raising a "didn't catch a command" error.
  *
  * The executor routes each intent to the right place:
  *   - add task        -> geminiService.analyzeTask + addTaskWithAnalysis
@@ -47,7 +50,7 @@ const cleanTaskName = (s) =>
  * Map a raw transcript to an intent (+ optional task title).
  * Order matters: the most specific patterns are tested first.
  */
-export function parseVoiceCommand(input = '') {
+function detectVoiceIntent(input = '') {
   const raw = clean(input).replace(/[.!?]+$/, '');
   if (!raw) return { intent: VOICE_INTENTS.UNKNOWN, title: '', raw: '' };
   const t = raw.toLowerCase();
@@ -108,7 +111,38 @@ export function parseVoiceCommand(input = '') {
 
   return { intent: VOICE_INTENTS.UNKNOWN, title: '', raw };
 }
+// Intents that perform a concrete app action (mutate tasks / navigate the app)
+// run immediately. Everything else is treated as natural language for the
+// Copilot: the transcript is dropped into the Assistant input instead of
+// throwing a "didn't catch a command" error.
+const COMMAND_INTENTS = new Set([
+  VOICE_INTENTS.ADD_TASK,
+  VOICE_INTENTS.COMPLETE_TASK,
+  VOICE_INTENTS.SHOW_HIGH_PRIORITY,
+]);
 
+/**
+ * Classify a spoken transcript.
+ *
+ * @returns {{ type:'command'|'text', intent:string, action:string, text:string,
+ *             title:string, raw:string, confidence:number }}
+ *   - type "command": a concrete action (add / complete a task, show priorities)
+ *     handled by executeVoiceCommand.
+ *   - type "text": natural language for the Copilot. The caller should place
+ *     `text` into the Assistant input (and optionally send it) - never an error.
+ */
+export function parseVoiceCommand(input = '') {
+  const base = detectVoiceIntent(input);
+  const isCommand = COMMAND_INTENTS.has(base.intent);
+  const confidence = base.intent === VOICE_INTENTS.UNKNOWN ? 0.4 : isCommand ? 0.9 : 0.6;
+  return {
+    ...base,
+    type: isCommand ? 'command' : 'text',
+    action: isCommand ? base.intent : 'assistant',
+    text: base.raw,
+    confidence,
+  };
+}
 /** Build the Assistant deep-link that auto-sends a spoken question. */
 const assistantRoute = (raw) => `/assistant?q=${encodeURIComponent(raw)}`;
 

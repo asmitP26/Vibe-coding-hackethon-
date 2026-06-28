@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { motion, AnimatePresence, useReducedMotion } from 'framer-motion';
+import { AlertTriangle } from 'lucide-react';
 import AssistantResponseCards from './AssistantResponseCards';
 import TypewriterText from './TypewriterText';
 import { cn } from '../../lib/cn';
@@ -21,6 +22,9 @@ export default function AssistantMessage({ message, animate = false, onTyped, bu
   // Cards are hidden until typing finishes (only when actually animating).
   const [revealed, setRevealed] = useState(!willAnimate);
   const cards = message?.cards || [];
+  // Only flag a fallback when a key IS configured but THIS reply came back from
+  // the local fallback (a real Gemini failure). Pure mock mode is not flagged.
+  const showFallbackNote = message?.fallbackUsed === true && message?.configured === true;
 
   const handleComplete = () => {
     setRevealed(true);
@@ -32,6 +36,12 @@ export default function AssistantMessage({ message, animate = false, onTyped, bu
       <div className={bubbleClassName}>
         <TypewriterText text={message?.content || ''} animate={willAnimate} onComplete={handleComplete} />
       </div>
+      {showFallbackNote && (
+        <p className="mt-1 flex items-center gap-1 text-[11px] text-amber-600">
+          <AlertTriangle className="h-3 w-3 shrink-0" />
+          Fallback response used because Gemini request failed.
+        </p>
+      )}
       <AnimatePresence>
         {revealed && cards.length > 0 && (
           <motion.div

@@ -11,7 +11,11 @@ import { tasks as mockTasks, habits as mockHabits } from '../data/mockData';
 const KEYS = {
   TASKS: 'dg.tasks.v1',
   HABITS: 'dg.habits.v1',
+  ASSISTANT: 'deadlineGuardian.assistantMessages',
 };
+
+// Cap the persisted conversation so localStorage never grows unbounded.
+const MAX_ASSISTANT_MESSAGES = 50;
 
 function available() {
   try {
@@ -74,11 +78,27 @@ export function saveHabits(habits) {
   return write(KEYS.HABITS, Array.isArray(habits) ? habits : mockHabits);
 }
 
+/**
+ * Assistant conversation persistence so the Copilot chat survives navigation and
+ * refresh (shared by the full Assistant page and the floating panel). Returns
+ * the provided `fallback` when nothing is stored or the data is corrupted.
+ */
+export function getAssistantMessages(fallback = []) {
+  return readArray(KEYS.ASSISTANT, fallback);
+}
+
+/** Persist the conversation, keeping only the most recent messages. */
+export function saveAssistantMessages(messages) {
+  const list = Array.isArray(messages) ? messages : [];
+  return write(KEYS.ASSISTANT, list.slice(-MAX_ASSISTANT_MESSAGES));
+}
+
 export function clearAll() {
   if (!available()) return;
   try {
     window.localStorage.removeItem(KEYS.TASKS);
     window.localStorage.removeItem(KEYS.HABITS);
+    window.localStorage.removeItem(KEYS.ASSISTANT);
   } catch {
     /* ignore */
   }

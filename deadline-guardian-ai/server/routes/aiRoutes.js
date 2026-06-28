@@ -20,6 +20,7 @@ import {
   isGeminiConfigured,
   getGeminiHealth,
   runGeminiTest,
+  runAssistantSelfTest,
 } from '../services/geminiServerService.js';
 
 const router = Router();
@@ -77,6 +78,19 @@ router.get(
   '/test',
   safeHandler(async (req, res) => {
     const result = await runGeminiTest();
+    res.status(result.ok ? 200 : 503).json(result);
+  }),
+);
+
+// --- Test (assistant) ---------------------------------------------------------
+// GET /api/ai/test-assistant -> exercises the SAME context-aware assistant path
+// the chat UI uses ("What should I do right now?"). Confirms the assistant gets
+// a real, non-fallback Gemini reply when a key is configured. 200 on a live
+// reply, 503 when it falls back (no key / timeout / error).
+router.get(
+  '/test-assistant',
+  safeHandler(async (req, res) => {
+    const result = await runAssistantSelfTest();
     res.status(result.ok ? 200 : 503).json(result);
   }),
 );

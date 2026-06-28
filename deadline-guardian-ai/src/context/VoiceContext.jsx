@@ -7,7 +7,7 @@ import {
   useRef,
   useState,
 } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useApp } from './AppContext';
 import {
   isVoiceSupported,
@@ -38,16 +38,36 @@ const RESET_MS = 2600;
 
 export function VoiceProvider({ children }) {
   const navigate = useNavigate();
+  const location = useLocation();
   const { tasks, addTaskWithAnalysis, toggleTask, showToast } = useApp();
 
   const [supported] = useState(() => isVoiceSupported());
   const [status, setStatus] = useState('idle'); // idle | listening | processing | success | error
   const [transcript, setTranscript] = useState('');
   const [feedback, setFeedback] = useState('');
+  // A spoken question that should land in the Assistant input (not an action).
+  // Consumers (Assistant page + floating panel) read this, fill their input,
+  // then call clearAssistantDraft(). Stored as an object so repeating the same
+  // phrase still produces a new reference and re-triggers the consumer effect.
+  const [assistantDraft, setAssistantDraftState] = useState(null);
+  // When true, a captured voice question is sent automatically; otherwise it
+  // just fills the input and waits for the user to press send. Default: fill-only.
+  const [voiceAutoSend] = useState(false);
 
   const resetTimer = useRef(null);
   const finalHandled = useRef(false);
   const lastTranscript = useRef('');
+  // Track the current route without re-subscribing the recognizer on each nav.
+  const locationRef = useRef(location.pathname);
+  locationRef.current = location.pathname;
+
+  const setAssistantDraft = useCallback((text) => {
+    const value = typeof text === 'string' ? text.trim() : '';
+    if (!value) return;
+    setAssistantDraftState({ text: value, token: Date.now() });
+  }, []);
+
+  const clearAssistantDraft = useCallback(() => setAssistantDraftState(null), []);
 
   // Keep the freshest app data/handlers available to the executor without
   // re-subscribing to the (singleton) voice service on every state change.
@@ -67,6 +87,36 @@ export function VoiceProvider({ children }) {
     async (text) => {
       setStatus('processing');
       const parsed = parseVoiceCommand(text);
+
+      // Natural language -> route it into the Assistant input instead of raising
+      // a "didn't catch a command" error. The user can then press send (or it
+      // auto-sends when voiceAutoSend is on).
+      if (parsed.type === 'text') {
+        const draft = (parsed.text || '').trim();
+        if (!draft) {
+          const msg = "I didn't catch that. Tap the mic and try again.";
+          setFeedback(msg);
+          setStatus('error');
+          showToast(msg, 'info');
+          scheduleReset();
+          return;
+        }
+        setAssistantDraft(draft);
+        const msg = 'Voice captured. Press send to ask Copilot.';
+        setFeedback(msg);
+        setStatus('success');
+        showToast(msg, 'info');
+        // Surface the filled input: hop to the Assistant page if we're elsewhere
+        // (the floating panel, if open, fills from the same shared draft).
+        try {
+          if (!String(locationRef.current || '').startsWith('/assistant')) navigate('/assistant');
+        } catch {
+          /* navigation is best-effort */
+        }
+        scheduleReset();
+        return;
+      }
+
       let result;
       try {
         result = await executeVoiceCommand(parsed, depsRef.current);
@@ -79,7 +129,7 @@ export function VoiceProvider({ children }) {
       if (result.message) showToast(result.message, result.tone || (result.ok ? 'success' : 'warning'));
       scheduleReset();
     },
-    [showToast, scheduleReset],
+    [showToast, scheduleReset, navigate, setAssistantDraft],
   );
 
   // Subscribe ONCE to the singleton recognizer.
@@ -180,8 +230,13 @@ export function VoiceProvider({ children }) {
       start,
       stop,
       toggle,
+      // assistant draft channel (voice -> Assistant input)
+      assistantDraft,
+      setAssistantDraft,
+      clearAssistantDraft,
+      voiceAutoSend,
     }),
-    [supported, status, transcript, feedback, start, stop, toggle],
+    [supported, status, transcript, feedback, start, stop, toggle, assistantDraft, setAssistantDraft, clearAssistantDraft, voiceAutoSend],
   );
 
   return <VoiceContext.Provider value={value}>{children}</VoiceContext.Provider>;

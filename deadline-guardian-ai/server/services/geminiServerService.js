@@ -386,6 +386,11 @@ function buildPrompt(template, input) {
 // 6. TRANSPORT - the single integration point with Gemini.
 // ============================================================================
 const REQUEST_TIMEOUT_MS = 15000;
+// Conversational replies (assistant chat) and the coaching review are grounded,
+// multi-sentence generations that can take noticeably longer than the quick
+// structured calls - give them a larger budget so they don't time out into the
+// mock fallback while a fast call (e.g. analyze-task) succeeds.
+const ASSISTANT_TIMEOUT_MS = 45000;
 const pad = (n) => String(n).padStart(2, '0');
 const fmtHour = (h) => `${pad(Math.floor(h))}:${pad(Math.round((h - Math.floor(h)) * 60))}`;
 const diffHours = (start, end) => {
@@ -510,12 +515,47 @@ async function callGemini(prompt, signal) {
       /* body was not JSON; keep status text only */
     }
     const suffix = detail ? ` - ${detail}` : '';
-    throw new Error(`Gemini request failed: ${res.status} ${res.statusText} [model=${usedModel}]${suffix}`);
+    const httpError = new Error(`Gemini request failed: ${res.status} ${res.statusText} [model=${usedModel}]${suffix}`);
+    httpError.status = res.status; // surfaced in safe logs (never the key)
+    throw httpError;
   }
 
   const data = await res.json();
   // A blocked / empty candidate has no text; treat that as a failure to parse.
   return data?.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
+}
+
+/**
+ * Classify a safe error message into a short machine-readable reason so the
+ * client can react (e.g. show "timeout" vs "error"). Never inspects the key.
+ */
+function classifyGeminiReason(message = '') {
+  const m = String(message).toLowerCase();
+  if (m.includes('timed out') || m.includes('aborted')) return 'timeout';
+  if (m.includes('unparseable') || m.includes('empty json')) return 'unparseable';
+  if (/\b(401|403|api key|permission)\b/.test(m)) return 'auth';
+  if (/\b(429|quota|rate)\b/.test(m)) return 'quota';
+  if (/\b(404|not found|model)\b/.test(m)) return 'model';
+  return 'error';
+}
+
+/**
+ * One-line, SECURITY-safe request log. Never logs the API key or user payload -
+ * only the endpoint label, model, HTTP status, ok/fallback flags and duration.
+ */
+function logGemini({ label, model, ok, fallbackUsed, durationMs, statusCode, note }) {
+  const parts = [
+    `[gemini] ${label || 'request'}`,
+    `model=${model}`,
+    statusCode != null ? `status=${statusCode}` : null,
+    `ok=${ok === true}`,
+    `fallback=${fallbackUsed === true}`,
+    `${Math.max(0, Math.round(durationMs || 0))}ms`,
+    note ? `- ${note}` : null,
+  ].filter(Boolean);
+  const line = parts.join(' ');
+  if (ok) console.log(line);
+  else console.warn(line);
 }
 
 /**
@@ -529,31 +569,42 @@ async function callGemini(prompt, signal) {
  *
  * @param {string} prompt        Fully-built prompt (template + INPUT).
  * @param {object} fallbackData  Deterministic mock used when AI is off or fails.
+ * @param {{ timeoutMs?: number, label?: string }} [options]
+ *   timeoutMs - per-call abort budget (defaults to REQUEST_TIMEOUT_MS). The
+ *     conversational assistant + coach use a longer budget than quick calls
+ *     because grounded, multi-sentence replies can take longer to generate.
+ *   label - short endpoint name used only in safe logs.
  */
-export async function generateJSON(prompt, fallbackData) {
+export async function generateJSON(prompt, fallbackData, options = {}) {
   if (!isGeminiConfigured()) {
     return fallbackData;
   }
 
+  const timeoutMs = Number(options.timeoutMs) > 0 ? Number(options.timeoutMs) : REQUEST_TIMEOUT_MS;
+  const label = typeof options.label === 'string' && options.label ? options.label : 'generateJSON';
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const startedAt = Date.now();
   try {
     const text = await callGemini(prompt, controller.signal);
     const parsed = safeParseJSON(text, null);
+    const durationMs = Date.now() - startedAt;
     if (parsed == null) {
       recordGeminiFailure('Gemini returned unparseable or empty JSON');
-      console.warn(`[geminiServerService] Gemini returned unparseable JSON [model=${getGeminiModel()}] - using fallback data.`);
+      logGemini({ label, model: getActiveModel(), ok: false, fallbackUsed: true, durationMs, statusCode: 200, note: 'unparseable JSON' });
       return fallbackData;
     }
     recordGeminiSuccess();
+    logGemini({ label, model: getActiveModel(), ok: true, fallbackUsed: false, durationMs, statusCode: 200 });
     return withFallbackShape(parsed, fallbackData);
   } catch (error) {
     // Safe message only - never log the key or full user payload.
+    const durationMs = Date.now() - startedAt;
     const message = error?.name === 'AbortError'
-      ? `Gemini request timed out after ${REQUEST_TIMEOUT_MS}ms [model=${getGeminiModel()}]`
+      ? `Gemini request timed out after ${timeoutMs}ms [model=${getActiveModel()}]`
       : (error?.message || 'unknown error');
     recordGeminiFailure(message);
-    console.warn(`[geminiServerService] Gemini request failed - using fallback data. (${message})`);
+    logGemini({ label, model: getActiveModel(), ok: false, fallbackUsed: true, durationMs, statusCode: error?.status, note: message });
     return fallbackData;
   } finally {
     clearTimeout(timer);
@@ -836,7 +887,7 @@ export async function getProductivityCoachingOnServer(context = {}) {
     improvements: ['Reduce last-minute crunches', 'Batch quick admin tasks together'],
     assumptions,
   };
-  return generateJSON(prompt, mockResponse);
+  return generateJSON(prompt, mockResponse, { timeoutMs: ASSISTANT_TIMEOUT_MS, label: 'productivity-coach' });
 }
 
 /**
@@ -851,7 +902,7 @@ export async function getProductivityCoachingOnServer(context = {}) {
  *     steered by the detected `intent`, and falls back to null on any failure.
  *
  * @param {object} payload { message, context, history, intent }
- * @returns {Promise<{ reply: string|null, intent: string, mode: string }>}
+ * @returns {Promise<{ ok:boolean, reply: string|null, intent: string, mode: string, fallbackUsed: boolean, configured: boolean, reason: string|null }>}
  */
 const ASSISTANT_INTENTS = new Set(['now', 'feasibility', 'time_box', 'energy', 'insights', 'chat']);
 
@@ -859,33 +910,88 @@ export async function chatWithCopilotOnServer(payload = {}) {
   const intent = ASSISTANT_INTENTS.has(payload.intent) ? payload.intent : 'chat';
   const message = typeof payload.message === 'string' ? payload.message : '';
 
-  // MOCK mode: nothing to enhance - let the client use its local deterministic reply.
+  // MOCK mode: nothing to enhance - let the client use its local deterministic
+  // reply. This is NOT a failure, so reason stays null (the UI shows the normal
+  // "Mock AI Mode" badge, not a "Gemini request failed" warning).
   if (!isGeminiConfigured()) {
-    return { reply: null, intent, mode: 'mock' };
+    return { ok: false, reply: null, intent, mode: 'mock', fallbackUsed: true, configured: false, reason: null };
   }
 
   const context = isPlainObject(payload.context) ? payload.context : {};
   const history = Array.isArray(payload.history) ? payload.history.slice(-5) : [];
   const guide = ASSISTANT_INTENT_GUIDES[intent] || ASSISTANT_INTENT_GUIDES.chat;
 
+  // Keep the prompt SMALL and focused so the call stays fast and reliable:
+  // top pending tasks, the few highest-risk tasks, today's schedule, recent
+  // history. (Smaller input => lower latency => fewer timeouts/fallbacks.)
+  const pendingTasks = Array.isArray(context.tasks)
+    ? sortTasksByPriority(context.tasks.filter((t) => t && t.status !== 'completed')).slice(0, 8).map(slimTask)
+    : [];
+  const highRiskTasks = Array.isArray(context.highRiskTasks)
+    ? context.highRiskTasks.slice(0, 5).map(slimTask)
+    : pendingTasks.filter((t) => ['critical', 'high'].includes(t.riskLevel)).slice(0, 5);
+
   const input = {
     intent,
     guidance: guide,
     message,
     currentTime: typeof context.currentTime === 'string' ? context.currentTime : new Date().toISOString(),
-    tasks: Array.isArray(context.tasks) ? context.tasks.slice(0, 20).map(slimTask) : [],
-    habits: Array.isArray(context.habits) ? context.habits.slice(0, 12) : [],
-    scheduleBlocks: Array.isArray(context.scheduleBlocks) ? context.scheduleBlocks.slice(0, 12) : [],
+    tasks: pendingTasks,
+    highRiskTasks,
+    habits: Array.isArray(context.habits) ? context.habits.slice(0, 8) : [],
+    scheduleBlocks: Array.isArray(context.scheduleBlocks) ? context.scheduleBlocks.slice(0, 8) : [],
     productivityStats: isPlainObject(context.productivityStats) ? context.productivityStats : {},
     history,
   };
 
   const prompt = buildPrompt(ASSISTANT_CHAT_PROMPT, input);
-  const result = await generateJSON(prompt, { reply: null, intent });
+  const result = await generateJSON(prompt, { reply: null, intent }, { timeoutMs: ASSISTANT_TIMEOUT_MS, label: 'assistant-chat' });
   const reply = result && typeof result.reply === 'string' && result.reply.trim() ? result.reply.trim() : null;
-  // Report the REAL mode: if the live call failed, generateJSON returned the
-  // fallback (reply: null) and health is now "mock" - tell the client so the UI
-  // can indicate a mock/fallback response instead of claiming "live".
-  const mode = getAIMode();
-  return { reply, intent, mode };
+
+  // Report the REAL outcome. If the live call failed, generateJSON returned the
+  // fallback (reply: null) and health is now "mock" - tell the client (with a
+  // safe reason) so the UI can flag a fallback response instead of "live".
+  const live = reply != null && getAIMode() === 'live';
+  return {
+    ok: live,
+    reply,
+    intent,
+    mode: live ? 'live' : 'mock',
+    fallbackUsed: !live,
+    configured: true,
+    reason: live ? null : classifyGeminiReason(geminiHealth.lastError || ''),
+  };
+}
+
+/**
+ * Self-test for GET /api/ai/test-assistant: run a real "what should I do right
+ * now?" question through the SAME assistant path the UI uses and report whether
+ * a live, non-fallback reply came back. Never throws; never logs the key.
+ */
+export async function runAssistantSelfTest() {
+  const model = getActiveModel();
+  if (!isGeminiConfigured()) {
+    return { ok: false, mode: 'mock', model, fallbackUsed: true, reason: 'no_key', reply: null,
+      error: 'No GEMINI_API_KEY configured on the server (running in mock mode).' };
+  }
+  const result = await chatWithCopilotOnServer({
+    message: 'What should I do right now?',
+    intent: 'now',
+    context: {
+      currentTime: new Date().toISOString(),
+      tasks: [
+        { id: 't1', title: 'Finish hackathon MVP', deadline: new Date(Date.now() + 6 * 3600 * 1000).toISOString(), estimatedEffort: 4, importance: 5, status: 'todo', riskLevel: 'critical' },
+        { id: 't2', title: 'Write project README', deadline: new Date(Date.now() + 8 * 3600 * 1000).toISOString(), estimatedEffort: 1, importance: 3, status: 'todo', riskLevel: 'high' },
+      ],
+    },
+    history: [],
+  });
+  return {
+    ok: result.ok === true,
+    mode: result.mode,
+    model: getActiveModel(),
+    fallbackUsed: result.fallbackUsed === true,
+    reason: result.ok ? null : (result.reason || 'fallback'),
+    reply: result.reply,
+  };
 }

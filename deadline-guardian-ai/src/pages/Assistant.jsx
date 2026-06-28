@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Send, Sparkles, Bot, User as UserIcon } from 'lucide-react';
+import { Send, Sparkles, Bot, User as UserIcon, Trash2 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import PageHeader from '../components/common/PageHeader';
 import Card from '../components/common/Card';
@@ -8,12 +8,14 @@ import AIModeBadge from '../components/common/AIModeBadge';
 import MicButton from '../components/common/MicButton';
 import AssistantMessage from '../components/assistant/AssistantMessage';
 import { useApp } from '../context/AppContext';
+import { useVoice } from '../context/VoiceContext';
 import { useCopilot } from '../hooks/useCopilot';
 import { cn } from '../lib/cn';
 
 export default function Assistant() {
-  const { quickPrompts } = useApp();
-  const { messages, thinking, send } = useCopilot({ seed: 'full' });
+  const { quickPrompts, clearAssistantConversation } = useApp();
+  const { messages, thinking, send } = useCopilot();
+  const { assistantDraft, clearAssistantDraft, voiceAutoSend } = useVoice();
   const [input, setInput] = useState('');
   const [searchParams, setSearchParams] = useSearchParams();
   const handledQuery = useRef(null);
@@ -52,6 +54,21 @@ export default function Assistant() {
     setSearchParams(next, { replace: true });
   }, [searchParams, send, setSearchParams]);
 
+  // A spoken question routed from the global voice session fills the composer
+  // (and auto-sends only when voiceAutoSend is enabled).
+  useEffect(() => {
+    const draftText = assistantDraft?.text;
+    if (!draftText) return;
+    setInput(draftText);
+    clearAssistantDraft();
+    if (voiceAutoSend) {
+      const id = setTimeout(() => submit(draftText), 400);
+      return () => clearTimeout(id);
+    }
+    return undefined;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [assistantDraft, voiceAutoSend, clearAssistantDraft]);
+
   function submit(text) {
     const content = (text ?? input).trim();
     if (!content) return;
@@ -62,7 +79,18 @@ export default function Assistant() {
   return (
     <div className="flex h-[calc(100vh-9rem)] flex-col lg:h-[calc(100vh-7rem)]">
       <PageHeader title="Productivity Copilot" subtitle="Ask anything about your tasks, plan, or deadlines.">
-        <AIModeBadge />
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={clearAssistantConversation}
+            className="chip text-slate-500 hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600"
+            title="Clear conversation"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+            Clear
+          </button>
+          <AIModeBadge />
+        </div>
       </PageHeader>
 
       {/* Quick prompts */}

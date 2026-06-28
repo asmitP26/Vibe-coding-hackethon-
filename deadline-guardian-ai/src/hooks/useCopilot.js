@@ -1,37 +1,54 @@
 import { useCallback, useRef, useState } from 'react';
 import { useApp, createId } from '../context/AppContext';
 import { runAssistant } from '../services/assistantEngine';
-import { getAIMode } from '../services/geminiService';
 
-const GREETING = {
-  id: 'copilot-greeting',
-  role: 'assistant',
-  content:
-    "Hi! I'm your Productivity Copilot. Ask me to plan your day, surface deadline risks, or break down your biggest task - I'll use your real tasks, habits, and schedule.",
-};
+/**
+ * Rebuild short-term memory (last few {user, assistant, intent} turns) from the
+ * shared conversation, so replies can build on what was just discussed even
+ * after a refresh or when switching between the page and the floating panel.
+ */
+function buildHistory(messages, limit = 5) {
+  const list = Array.isArray(messages) ? messages : [];
+  const turns = [];
+  for (let i = 0; i < list.length; i += 1) {
+    if (list[i]?.role === 'user') {
+      const next = list[i + 1];
+      if (next && next.role === 'assistant') {
+        turns.push({ user: list[i].content, assistant: next.content, intent: next.kind });
+      }
+    }
+  }
+  return turns.slice(-limit);
+}
 
 /**
  * useCopilot - shared chat logic for the Assistant page and the floating panel.
- * `seed`: "full" reuses the seeded demo history; "compact" starts with a single
- * greeting (better for the small popover). Each consumer owns its own history.
+ *
+ * The messages now live in AppContext (persisted to localStorage), so every
+ * consumer renders the SAME conversation and it survives navigation + refresh.
+ * The `seed` option is accepted for backward compatibility but no longer forks
+ * state - both surfaces share one conversation.
  */
-export function useCopilot({ seed = 'full' } = {}) {
-  const { tasks, habits, scheduleBlocks, productivityStats, assistantMessages } = useApp();
-  const [messages, setMessages] = useState(() =>
-    seed === 'full' ? assistantMessages : [GREETING],
-  );
+export function useCopilot() {
+  const {
+    tasks,
+    habits,
+    scheduleBlocks,
+    productivityStats,
+    assistantConversation,
+    appendAssistantMessages,
+  } = useApp();
   const [thinking, setThinking] = useState(false);
   const busy = useRef(false);
-  // Short-term memory: last 5 {user, assistant, intent} turns sent to the brain
-  // so replies can build on what was just discussed.
-  const historyRef = useRef([]);
 
   const send = useCallback(
     async (text) => {
       const content = (text ?? '').trim();
       if (!content || busy.current) return;
       busy.current = true;
-      setMessages((prev) => [...prev, { id: createId('u'), role: 'user', content }]);
+      // History must reflect prior turns only (before this new message).
+      const history = buildHistory(assistantConversation);
+      appendAssistantMessages({ id: createId('u'), role: 'user', content });
       setThinking(true);
       try {
         const res = await runAssistant(content, {
@@ -39,41 +56,40 @@ export function useCopilot({ seed = 'full' } = {}) {
           habits,
           scheduleBlocks,
           productivityStats,
-          history: historyRef.current,
+          history,
         });
-        setMessages((prev) => [
-          ...prev,
-          { id: createId('a'), role: 'assistant', content: res.content, cards: res.cards, kind: res.kind },
-        ]);
-        // Record this turn (cap at the last 5 interactions).
-        historyRef.current = [
-          ...historyRef.current,
-          { user: content, assistant: res.content, intent: res.kind },
-        ].slice(-5);
+        appendAssistantMessages({
+          id: createId('a'),
+          role: 'assistant',
+          content: res.content,
+          cards: res.cards,
+          kind: res.kind,
+          // Per-response AI metadata so the UI can flag a single fallback message.
+          mode: res.mode,
+          fallbackUsed: res.fallbackUsed,
+          configured: res.configured,
+        });
       } catch (err) {
         // runAssistant falls back to mock internally, so this only fires on a
         // truly unexpected throw. Surface a graceful message instead of letting
         // it become an unhandled rejection or stall the "thinking" state.
         console.warn('[useCopilot] assistant failed - showing a graceful message.', err);
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: createId('a'),
-            role: 'assistant',
-            content:
-              "I hit a snag reaching the assistant just now. Please try again in a moment — your tasks and data are safe.",
-            kind: 'error',
-          },
-        ]);
+        appendAssistantMessages({
+          id: createId('a'),
+          role: 'assistant',
+          content:
+            "I hit a snag reaching the assistant just now. Please try again in a moment — your tasks and data are safe.",
+          kind: 'error',
+        });
       } finally {
         setThinking(false);
         busy.current = false;
       }
     },
-    [tasks, habits, scheduleBlocks, productivityStats],
+    [tasks, habits, scheduleBlocks, productivityStats, assistantConversation, appendAssistantMessages],
   );
 
-  return { messages, thinking, send, mode: getAIMode() };
+  return { messages: assistantConversation, thinking, send };
 }
 
 export default useCopilot;

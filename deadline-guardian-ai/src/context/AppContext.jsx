@@ -14,6 +14,8 @@ import {
   saveTasks,
   getHabits,
   saveHabits,
+  getAssistantMessages,
+  saveAssistantMessages,
 } from '../services/storageService';
 
 const AppContext = createContext(null);
@@ -35,6 +37,14 @@ const asArray = (value) => (Array.isArray(value) ? value : []);
 /** Coerce any value to a plain object, else use the provided fallback. */
 const asObject = (value, fallback) =>
   value && typeof value === 'object' && !Array.isArray(value) ? value : fallback;
+
+/** The Copilot's opening line, shown after the conversation is cleared. */
+const ASSISTANT_GREETING = {
+  id: 'copilot-greeting',
+  role: 'assistant',
+  content:
+    "Hi! I'm your Productivity Copilot. Ask me to plan your day, surface deadline risks, or break down your biggest task - I'll use your real tasks, habits, and schedule.",
+};
 
 export function createId(prefix = 'id') {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -81,6 +91,33 @@ export function AppProvider({ children }) {
   useEffect(() => {
     saveHabits(habits);
   }, [habits]);
+
+  // Shared, persisted Copilot conversation. Lives here (not inside useCopilot)
+  // so the full Assistant page and the floating panel render the SAME messages,
+  // and the chat survives navigation + refresh. Seeded from storage, falling
+  // back to the demo history on first ever load.
+  const [assistantConversation, setAssistantConversation] = useState(() => {
+    const stored = getAssistantMessages(null);
+    return Array.isArray(stored) && stored.length ? stored : asArray(assistantMessages);
+  });
+
+  useEffect(() => {
+    saveAssistantMessages(assistantConversation);
+  }, [assistantConversation]);
+
+  /** Append one or more messages to the shared conversation (capped at 50). */
+  const appendAssistantMessages = useCallback((incoming) => {
+    const additions = (Array.isArray(incoming) ? incoming : [incoming]).filter(
+      (m) => m && typeof m === 'object',
+    );
+    if (!additions.length) return;
+    setAssistantConversation((prev) => [...prev, ...additions].slice(-50));
+  }, []);
+
+  /** Reset the conversation back to a single fresh greeting. */
+  const clearAssistantConversation = useCallback(() => {
+    setAssistantConversation([{ ...ASSISTANT_GREETING }]);
+  }, []);
 
   const addTask = useCallback((partial) => {
     const newTask = {
@@ -245,6 +282,10 @@ export function AppProvider({ children }) {
       dailyBrief: asObject(dailyBrief, { summary: '', highlights: [] }),
       assistantMessages: asArray(assistantMessages),
       quickPrompts: asArray(quickPrompts),
+      // shared, persisted Copilot conversation + actions
+      assistantConversation: asArray(assistantConversation),
+      appendAssistantMessages,
+      clearAssistantConversation,
       // actions
       addTask,
       addTaskWithAnalysis,
@@ -260,7 +301,7 @@ export function AppProvider({ children }) {
       showToast,
       dismissToast,
     }),
-    [tasks, habits, addTask, addTaskWithAnalysis, updateTask, toggleTask, deleteTask, toggleSubtask, addSubtasks, applyBreakdown, toggleHabit, toast, showToast, dismissToast],
+    [tasks, habits, addTask, addTaskWithAnalysis, updateTask, toggleTask, deleteTask, toggleSubtask, addSubtasks, applyBreakdown, toggleHabit, toast, showToast, dismissToast, assistantConversation, appendAssistantMessages, clearAssistantConversation],
   );
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;

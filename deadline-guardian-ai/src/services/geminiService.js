@@ -32,6 +32,10 @@ import {
 // ============================================================================
 const AI_BASE = '/api/ai';
 const REQUEST_TIMEOUT_MS = 20000;
+// The conversational assistant reply can take longer than quick structured
+// calls (grounded, multi-sentence generation), so it gets a larger budget to
+// avoid timing out into the local fallback while the backend is still working.
+const ASSISTANT_TIMEOUT_MS = 45000;
 
 /** True for a non-null, non-array object - used to safely backfill fields. */
 function isPlainObject(value) {
@@ -43,9 +47,10 @@ function isPlainObject(value) {
  * NEVER throws: on any HTTP / network / timeout error it logs a safe warning
  * and returns `fallback` (the locally-built mock), so the UI always gets data.
  */
-async function postAI(path, body, fallback) {
+async function postAI(path, body, fallback, options = {}) {
+  const timeoutMs = Number(options.timeoutMs) > 0 ? Number(options.timeoutMs) : REQUEST_TIMEOUT_MS;
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const res = await fetch(`${AI_BASE}${path}`, {
       method: 'POST',
@@ -454,7 +459,9 @@ export async function getProductivityCoaching(stats = {}, tasks = [], question =
  *
  * @param {{message:string, context:object, history:Array, intent:string}} payload
  * @param {string} fallbackReply  Deterministic reply used when AI is off/unreachable.
- * @returns {Promise<string>} The reply text to display.
+ * @returns {Promise<{ reply:string, mode:'live'|'mock', fallbackUsed:boolean, configured:boolean, reason:string|null }>}
+ *   `mode`/`fallbackUsed`/`configured` describe THIS reply (per-response), so the
+ *   UI can flag a single fallback message without mislabeling the whole session.
  */
 export async function chatWithCopilot(payload = {}, fallbackReply = '') {
   const body = {
@@ -463,7 +470,15 @@ export async function chatWithCopilot(payload = {}, fallbackReply = '') {
     history: Array.isArray(payload.history) ? payload.history.slice(-5) : [],
     intent: typeof payload.intent === 'string' ? payload.intent : 'chat',
   };
-  const data = await postAI('/assistant-chat', body, { reply: fallbackReply });
-  const reply = data && typeof data.reply === 'string' ? data.reply.trim() : '';
-  return reply || fallbackReply;
+  const data = await postAI('/assistant-chat', body, { reply: fallbackReply }, { timeoutMs: ASSISTANT_TIMEOUT_MS });
+  const replyText = data && typeof data.reply === 'string' ? data.reply.trim() : '';
+  const reply = replyText || fallbackReply;
+  const mode = data && (data.mode === 'live' || data.mode === 'mock') ? data.mode : getAIMode();
+  const configured = typeof data?.configured === 'boolean' ? data.configured : (getAIStatus().configured === true);
+  // Prefer the backend's explicit flag; otherwise infer: a non-live reply means
+  // the local fallback was shown. We only treat that as a *failure* (warning)
+  // when a key is actually configured - pure mock mode is normal, not an error.
+  const fallbackUsed = typeof data?.fallbackUsed === 'boolean' ? data.fallbackUsed : (mode !== 'live');
+  const reason = typeof data?.reason === 'string' ? data.reason : null;
+  return { reply, mode, fallbackUsed, configured, reason };
 }

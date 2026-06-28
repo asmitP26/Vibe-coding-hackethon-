@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { Sparkles, X, ArrowRight, Send } from 'lucide-react';
 import AssistantMessage from './AssistantMessage';
 import { useApp } from '../../context/AppContext';
+import { useVoice } from '../../context/VoiceContext';
 import { useCopilot } from '../../hooks/useCopilot';
 import MicButton from '../common/MicButton';
 import { cn } from '../../lib/cn';
@@ -12,7 +13,8 @@ import { cn } from '../../lib/cn';
 export default function AssistantPanel({ onClose }) {
   const navigate = useNavigate();
   const { quickPrompts } = useApp();
-  const { messages, thinking, send } = useCopilot({ seed: 'compact' });
+  const { messages, thinking, send } = useCopilot();
+  const { assistantDraft, clearAssistantDraft, voiceAutoSend } = useVoice();
   const [input, setInput] = useState('');
   const endRef = useRef(null);
 
@@ -33,6 +35,21 @@ export default function AssistantPanel({ onClose }) {
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, thinking]);
+
+  // A spoken question routed from the global voice session fills the composer
+  // (and auto-sends only when voiceAutoSend is enabled).
+  useEffect(() => {
+    const draftText = assistantDraft?.text;
+    if (!draftText) return;
+    setInput(draftText);
+    clearAssistantDraft();
+    if (voiceAutoSend) {
+      const id = setTimeout(() => submit(draftText), 400);
+      return () => clearTimeout(id);
+    }
+    return undefined;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [assistantDraft, voiceAutoSend, clearAssistantDraft]);
 
   function submit(text) {
     const content = (text ?? input).trim();

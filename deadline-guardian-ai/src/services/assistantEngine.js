@@ -15,7 +15,7 @@ import {
   generateDailyPlan,
   breakDownTask,
   rescheduleTasks,
-  getAIMode,
+  getAIStatus,
   chatWithCopilot,
 } from './geminiService';
 import { buildCopilotResponse } from './copilotBrain';
@@ -39,7 +39,13 @@ export const INTENTS = {
  */
 export function detectIntent(text = '') {
   const t = String(text).toLowerCase().trim();
-  if (/\b(plan|schedule|organi[sz]e)\b.*\b(day|today|morning|afternoon|evening)\b/.test(t)) {
+  // PLAN: organize the day, OR natural "how do I start/begin my day" phrasings.
+  if (
+    /\b(plan|schedule|organi[sz]e|map out|lay out)\b.*\b(day|today|morning|afternoon|evening|week)\b/.test(t) ||
+    /\bplan my day\b/.test(t) ||
+    /\b(start|begin|kick ?off|kick-?start)\b.*\b(my |the )?(day|morning|today)\b/.test(t) ||
+    /how (should i|do i|can i|to) (start|begin|kick off|approach|tackle|structure) (my |the )?(day|today|morning)/.test(t)
+  ) {
     return INTENTS.PLAN;
   }
   if (/break\s*(it|my|the|this)?\s*down|break down|biggest task|sub-?tasks?/.test(t)) {
@@ -48,7 +54,13 @@ export function detectIntent(text = '') {
   if (/resched|re-?plan\b|missed task|catch up|fell behind|behind schedule/.test(t)) {
     return INTENTS.RESCHEDULE;
   }
-  if (/\brisks?\b|at risk|deadline risk|overdue|what.*due/.test(t)) {
+  // RISKS: explicit risk words, OR "what's critical / urgent / most important /
+  // which task should I..." style questions about priority.
+  if (
+    /\brisks?\b|at risk|deadline risk|overdue|what.*\bdue\b/.test(t) ||
+    /\b(critical|urgent|most important|highest priority|high[- ]?priority)\b/.test(t) ||
+    /which task|what.*\b(important|priorit\w+)\b/.test(t)
+  ) {
     return INTENTS.RISKS;
   }
   return INTENTS.CHAT;
@@ -79,24 +91,34 @@ async function planDay(ctx) {
 
 /** Trim the live context to a small, safe payload for the backend Gemini call. */
 function buildContextPayload(ctx, currentTime) {
+  const ranked = sortTasksByPriority(activeTasks(ctx.tasks));
+  const slim = (t) => ({
+    id: t.id,
+    title: t.title,
+    deadline: t.deadline ?? null,
+    estimatedEffort: t.estimatedEffort ?? null,
+    importance: t.importance ?? null,
+    status: t.status ?? 'todo',
+    riskLevel: resolveRisk(t),
+    priorityScore: resolveScore(t),
+  });
+  // Keep this SMALL: the top pending tasks + the few highest-risk ones + today's
+  // schedule + recent history is plenty of grounding and keeps the call fast.
+  const pending = ranked.slice(0, 8).map(slim);
+  const highRiskTasks = ranked
+    .filter((t) => ['critical', 'high'].includes(resolveRisk(t)))
+    .slice(0, 5)
+    .map(slim);
   return {
     currentTime,
-    tasks: activeTasks(ctx.tasks).slice(0, 20).map((t) => ({
-      id: t.id,
-      title: t.title,
-      deadline: t.deadline ?? null,
-      estimatedEffort: t.estimatedEffort ?? null,
-      importance: t.importance ?? null,
-      status: t.status ?? 'todo',
-      riskLevel: resolveRisk(t),
-      priorityScore: resolveScore(t),
-    })),
-    habits: (Array.isArray(ctx.habits) ? ctx.habits : []).slice(0, 12).map((h) => ({
+    tasks: pending,
+    highRiskTasks,
+    habits: (Array.isArray(ctx.habits) ? ctx.habits : []).slice(0, 8).map((h) => ({
       name: h.name,
       streak: h.streak ?? 0,
       completedToday: !!h.completedToday,
     })),
-    scheduleBlocks: (Array.isArray(ctx.scheduleBlocks) ? ctx.scheduleBlocks : []).slice(0, 12).map((b) => ({
+    scheduleBlocks: (Array.isArray(ctx.scheduleBlocks) ? ctx.scheduleBlocks : []).slice(0, 8).map((b) => ({
       title: b.title,
       start: b.start,
       end: b.end,
@@ -126,7 +148,7 @@ async function copilotChat(message, ctx) {
     productivityStats: ctx.productivityStats,
     currentTime,
   });
-  const reply = await chatWithCopilot(
+  const ai = await chatWithCopilot(
     {
       message,
       context: buildContextPayload(ctx, currentTime),
@@ -135,7 +157,14 @@ async function copilotChat(message, ctx) {
     },
     local.reply,
   );
-  return { kind: local.intent, content: reply, cards: local.cards };
+  return {
+    kind: local.intent,
+    content: ai.reply,
+    cards: local.cards,
+    mode: ai.mode,
+    fallbackUsed: ai.fallbackUsed,
+    configured: ai.configured,
+  };
 }
 
 async function breakdownBiggest(ctx) {
@@ -224,6 +253,19 @@ export async function runAssistant(text, ctx = {}) {
   }
 }
 
+/**
+ * Stamp a response with per-RESPONSE AI metadata so the chat UI can flag a
+ * single fallback message accurately (instead of relying on the global badge).
+ *   - mode/configured: prefer values set by the route (the chat route knows the
+ *     real outcome of its Gemini call); otherwise read the cached status.
+ *   - fallbackUsed: a fallback is only a *failure worth flagging* when a key is
+ *     configured but this response did not come back live. Pure mock mode (no
+ *     key) is normal and is not flagged as a failure.
+ */
 function withMode(res) {
-  return { ...res, mode: getAIMode() };
+  const status = getAIStatus();
+  const mode = res.mode === 'live' || res.mode === 'mock' ? res.mode : (status.mode === 'live' ? 'live' : 'mock');
+  const configured = typeof res.configured === 'boolean' ? res.configured : status.configured === true;
+  const fallbackUsed = typeof res.fallbackUsed === 'boolean' ? res.fallbackUsed : (configured && mode !== 'live');
+  return { ...res, mode, configured, fallbackUsed };
 }
