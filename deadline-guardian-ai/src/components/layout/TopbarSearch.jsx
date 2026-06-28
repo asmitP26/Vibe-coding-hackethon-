@@ -30,7 +30,7 @@ const GROUP_ICONS = {
  */
 export default function TopbarSearch() {
   const navigate = useNavigate();
-  const { tasks, habits, scheduleBlocks, assistantConversation } = useApp();
+  const { tasks, habits, scheduleBlocks, assistantMessages } = useApp();
   const { open, setOpen, close, ref } = usePopover(false);
   const [query, setQuery] = useState('');
   const [activeIndex, setActiveIndex] = useState(0);
@@ -38,10 +38,10 @@ export default function TopbarSearch() {
   const results = useMemo(
     () =>
       searchEverything(
-        { tasks, habits, scheduleBlocks, assistantMessages: assistantConversation },
+        { tasks, habits, scheduleBlocks, assistantMessages },
         query,
       ),
-    [tasks, habits, scheduleBlocks, assistantConversation, query],
+    [tasks, habits, scheduleBlocks, assistantMessages, query],
   );
 
   // Visual (and keyboard-navigation) order = groups concatenated in display order.

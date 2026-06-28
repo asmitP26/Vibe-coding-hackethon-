@@ -11,13 +11,14 @@ import { tasks as mockTasks, habits as mockHabits } from '../data/mockData';
 const KEYS = {
   TASKS: 'dg.tasks.v1',
   HABITS: 'dg.habits.v1',
-  ASSISTANT: 'deadlineGuardian.assistantMessages',
   PREFERENCES: 'dg.preferences.v1',
   ALERTS: 'dg.alerts.v1',
 };
 
-// Cap the persisted conversation so localStorage never grows unbounded.
-const MAX_ASSISTANT_MESSAGES = 50;
+// Legacy key for the assistant chat that older builds persisted. The Copilot
+// conversation is now session-only (React state), so this key is only ever
+// removed, never written.
+const LEGACY_ASSISTANT_KEY = 'deadlineGuardian.assistantMessages';
 
 /**
  * User-editable profile + preferences, surfaced in the Topbar profile menu and
@@ -126,18 +127,17 @@ export function saveHabits(habits) {
 }
 
 /**
- * Assistant conversation persistence so the Copilot chat survives navigation and
- * refresh (shared by the full Assistant page and the floating panel). Returns
- * the provided `fallback` when nothing is stored or the data is corrupted.
+ * One-time cleanup of the assistant chat that older builds persisted. The
+ * Copilot conversation is now session-only (kept in React state and reset on
+ * refresh), so any previously stored messages are removed and never read again.
  */
-export function getAssistantMessages(fallback = []) {
-  return readArray(KEYS.ASSISTANT, fallback);
-}
-
-/** Persist the conversation, keeping only the most recent messages. */
-export function saveAssistantMessages(messages) {
-  const list = Array.isArray(messages) ? messages : [];
-  return write(KEYS.ASSISTANT, list.slice(-MAX_ASSISTANT_MESSAGES));
+export function clearLegacyAssistantStorage() {
+  if (!available()) return;
+  try {
+    window.localStorage.removeItem(LEGACY_ASSISTANT_KEY);
+  } catch {
+    /* ignore */
+  }
 }
 
 /**
@@ -177,7 +177,7 @@ export function clearAll() {
   try {
     window.localStorage.removeItem(KEYS.TASKS);
     window.localStorage.removeItem(KEYS.HABITS);
-    window.localStorage.removeItem(KEYS.ASSISTANT);
+    window.localStorage.removeItem(LEGACY_ASSISTANT_KEY);
     window.localStorage.removeItem(KEYS.PREFERENCES);
     window.localStorage.removeItem(KEYS.ALERTS);
   } catch {

@@ -4,8 +4,8 @@ import { runAssistant } from '../services/assistantEngine';
 
 /**
  * Rebuild short-term memory (last few {user, assistant, intent} turns) from the
- * shared conversation, so replies can build on what was just discussed even
- * after a refresh or when switching between the page and the floating panel.
+ * shared conversation, so replies can build on what was just discussed when
+ * switching between the Assistant page and the floating panel.
  */
 function buildHistory(messages, limit = 5) {
   const list = Array.isArray(messages) ? messages : [];
@@ -24,10 +24,9 @@ function buildHistory(messages, limit = 5) {
 /**
  * useCopilot - shared chat logic for the Assistant page and the floating panel.
  *
- * The messages now live in AppContext (persisted to localStorage), so every
- * consumer renders the SAME conversation and it survives navigation + refresh.
- * The `seed` option is accepted for backward compatibility but no longer forks
- * state - both surfaces share one conversation.
+ * The messages live in AppContext (session-only React state), so every consumer
+ * renders the SAME conversation and it survives navigation, while a page refresh
+ * intentionally starts a fresh session. Both surfaces share one conversation.
  */
 export function useCopilot() {
   const {
@@ -35,8 +34,8 @@ export function useCopilot() {
     habits,
     scheduleBlocks,
     productivityStats,
-    assistantConversation,
-    appendAssistantMessages,
+    assistantMessages,
+    addAssistantMessage,
   } = useApp();
   const [thinking, setThinking] = useState(false);
   const busy = useRef(false);
@@ -47,8 +46,8 @@ export function useCopilot() {
       if (!content || busy.current) return;
       busy.current = true;
       // History must reflect prior turns only (before this new message).
-      const history = buildHistory(assistantConversation);
-      appendAssistantMessages({ id: createId('u'), role: 'user', content });
+      const history = buildHistory(assistantMessages);
+      addAssistantMessage({ id: createId('u'), role: 'user', content });
       setThinking(true);
       try {
         const res = await runAssistant(content, {
@@ -58,7 +57,7 @@ export function useCopilot() {
           productivityStats,
           history,
         });
-        appendAssistantMessages({
+        addAssistantMessage({
           id: createId('a'),
           role: 'assistant',
           content: res.content,
@@ -74,7 +73,7 @@ export function useCopilot() {
         // truly unexpected throw. Surface a graceful message instead of letting
         // it become an unhandled rejection or stall the "thinking" state.
         console.warn('[useCopilot] assistant failed - showing a graceful message.', err);
-        appendAssistantMessages({
+        addAssistantMessage({
           id: createId('a'),
           role: 'assistant',
           content:
@@ -86,10 +85,10 @@ export function useCopilot() {
         busy.current = false;
       }
     },
-    [tasks, habits, scheduleBlocks, productivityStats, assistantConversation, appendAssistantMessages],
+    [tasks, habits, scheduleBlocks, productivityStats, assistantMessages, addAssistantMessage],
   );
 
-  return { messages: assistantConversation, thinking, send };
+  return { messages: assistantMessages, thinking, send };
 }
 
 export default useCopilot;

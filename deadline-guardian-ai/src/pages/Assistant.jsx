@@ -12,7 +12,7 @@ import { useCopilot } from '../hooks/useCopilot';
 import { cn } from '../lib/cn';
 
 export default function Assistant() {
-  const { quickPrompts, clearAssistantConversation } = useApp();
+  const { quickPrompts, clearAssistantMessages } = useApp();
   const { messages, thinking, send } = useCopilot();
   const { assistantDraft, clearAssistantDraft, voiceAutoSend } = useVoice();
   const [input, setInput] = useState('');
@@ -80,7 +80,7 @@ export default function Assistant() {
       <PageHeader title="Productivity Copilot" subtitle="Ask anything about your tasks, plan, or deadlines.">
         <button
           type="button"
-          onClick={clearAssistantConversation}
+          onClick={clearAssistantMessages}
           className="chip text-slate-500 hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600"
           title="Clear conversation"
         >

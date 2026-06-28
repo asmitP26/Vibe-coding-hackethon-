@@ -6,7 +6,6 @@ import {
   dailyGoals,
   productivityStats,
   dailyBrief,
-  assistantMessages,
   quickPrompts,
 } from '../data/mockData';
 import {
@@ -14,12 +13,11 @@ import {
   saveTasks,
   getHabits,
   saveHabits,
-  getAssistantMessages,
-  saveAssistantMessages,
   getPreferences,
   savePreferences,
   resetToMockData,
   saveAlertState,
+  clearLegacyAssistantStorage,
 } from '../services/storageService';
 import { markReminderTriggered as applyReminderTriggered } from '../services/alarmService';
 
@@ -101,31 +99,32 @@ export function AppProvider({ children }) {
     saveHabits(habits);
   }, [habits]);
 
-  // Shared, persisted Copilot conversation. Lives here (not inside useCopilot)
-  // so the full Assistant page and the floating panel render the SAME messages,
-  // and the chat survives navigation + refresh. Seeded from storage, falling
-  // back to the demo history on first ever load.
-  const [assistantConversation, setAssistantConversation] = useState(() => {
-    const stored = getAssistantMessages(null);
-    return Array.isArray(stored) && stored.length ? stored : asArray(assistantMessages);
-  });
+  // Shared, session-only Copilot conversation. Lives here (not inside useCopilot)
+  // so the full Assistant page and the floating panel render the SAME messages
+  // and the chat survives navigation. It is intentionally NOT persisted: every
+  // session opens with a single greeting and a page refresh starts over.
+  const [assistantMessages, setAssistantMessages] = useState(() => [
+    { ...ASSISTANT_GREETING },
+  ]);
 
+  // One-time cleanup of any conversation persisted by older builds, so stale
+  // chat is never read back. Going forward nothing is written to localStorage.
   useEffect(() => {
-    saveAssistantMessages(assistantConversation);
-  }, [assistantConversation]);
+    clearLegacyAssistantStorage();
+  }, []);
 
   /** Append one or more messages to the shared conversation (capped at 50). */
-  const appendAssistantMessages = useCallback((incoming) => {
+  const addAssistantMessage = useCallback((incoming) => {
     const additions = (Array.isArray(incoming) ? incoming : [incoming]).filter(
       (m) => m && typeof m === 'object',
     );
     if (!additions.length) return;
-    setAssistantConversation((prev) => [...prev, ...additions].slice(-50));
+    setAssistantMessages((prev) => [...prev, ...additions].slice(-50));
   }, []);
 
   /** Reset the conversation back to a single fresh greeting. */
-  const clearAssistantConversation = useCallback(() => {
-    setAssistantConversation([{ ...ASSISTANT_GREETING }]);
+  const clearAssistantMessages = useCallback(() => {
+    setAssistantMessages([{ ...ASSISTANT_GREETING }]);
   }, []);
 
   // User-editable profile + preferences (display name, work hours, focus length,
@@ -348,10 +347,10 @@ export function AppProvider({ children }) {
     setTasks(asArray(fresh?.tasks));
     setHabits(asArray(fresh?.habits));
     saveAlertState({ read: [], dismissed: [] });
-    clearAssistantConversation();
+    clearAssistantMessages();
     setDataVersion((v) => v + 1);
     showToast('Demo data restored - sample tasks, habits and reminders are back.', 'success');
-  }, [clearAssistantConversation, showToast]);
+  }, [clearAssistantMessages, showToast]);
 
   const value = useMemo(
     () => ({
@@ -365,12 +364,11 @@ export function AppProvider({ children }) {
       dailyGoals: asArray(dailyGoals),
       productivityStats: asObject(productivityStats, DEFAULT_STATS),
       dailyBrief: asObject(dailyBrief, { summary: '', highlights: [] }),
-      assistantMessages: asArray(assistantMessages),
       quickPrompts: asArray(quickPrompts),
-      // shared, persisted Copilot conversation + actions
-      assistantConversation: asArray(assistantConversation),
-      appendAssistantMessages,
-      clearAssistantConversation,
+      // shared, session-only Copilot conversation + actions
+      assistantMessages: asArray(assistantMessages),
+      addAssistantMessage,
+      clearAssistantMessages,
       // user-editable, persisted preferences
       preferences: asObject(preferences, {}),
       updatePreferences,
@@ -395,7 +393,7 @@ export function AppProvider({ children }) {
       dataVersion,
       resetDemoData,
     }),
-    [tasks, habits, addTask, addTaskWithAnalysis, updateTask, toggleTask, deleteTask, setTaskReminder, snoozeReminder, markReminderTriggered, toggleSubtask, addSubtasks, applyBreakdown, toggleHabit, toast, showToast, dismissToast, assistantConversation, appendAssistantMessages, clearAssistantConversation, preferences, updatePreferences, dataVersion, resetDemoData],
+    [tasks, habits, addTask, addTaskWithAnalysis, updateTask, toggleTask, deleteTask, setTaskReminder, snoozeReminder, markReminderTriggered, toggleSubtask, addSubtasks, applyBreakdown, toggleHabit, toast, showToast, dismissToast, assistantMessages, addAssistantMessage, clearAssistantMessages, preferences, updatePreferences, dataVersion, resetDemoData],
   );
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
