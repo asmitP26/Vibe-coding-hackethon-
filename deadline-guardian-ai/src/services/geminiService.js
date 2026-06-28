@@ -72,7 +72,7 @@ async function postAI(path, body, fallback) {
 // 2. AI MODE STATUS - drives the "Gemini Live via Secure Backend" / "Mock AI"
 //    badge. The backend's GET /api/ai/status is the single source of truth.
 // ============================================================================
-let cachedStatus = { mode: 'mock', provider: 'Google Gemini', secureProxy: true };
+let cachedStatus = { mode: 'mock', provider: 'Google Gemini', secureProxy: true, configured: false, model: null, lastError: null };
 
 /** Fetch + cache the backend AI status. Falls back to mock if unreachable. */
 export async function fetchAIStatus() {
@@ -85,6 +85,9 @@ export async function fetchAIStatus() {
           mode: data.mode,
           provider: data.provider ?? 'Google Gemini',
           secureProxy: data.secureProxy !== false,
+          configured: data.configured === true,
+          model: typeof data.model === 'string' ? data.model : null,
+          lastError: typeof data.lastError === 'string' ? data.lastError : null,
         };
       }
     }

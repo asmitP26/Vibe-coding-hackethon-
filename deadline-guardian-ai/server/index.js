@@ -14,6 +14,7 @@ import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import aiRoutes from './routes/aiRoutes.js';
+import { isGeminiConfigured, getGeminiModel } from './services/geminiServerService.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -64,7 +65,13 @@ app.use((err, req, res, next) => {
 });
 
 app.listen(PORT, () => {
-  const mode = process.env.GEMINI_API_KEY ? 'LIVE (Gemini)' : 'MOCK (no key)';
-  // Safe to log the mode and port; the key itself is never logged.
+  // Safe to log the mode, model, and port; the key itself is NEVER logged.
+  // "configured" means a real key is present - actual liveness is confirmed by
+  // the first request (or GET /api/ai/test) and reflected at GET /api/ai/status.
+  const configured = isGeminiConfigured();
+  const mode = configured ? `LIVE-capable (model: ${getGeminiModel()})` : 'MOCK (no key)';
   console.log(`[server] Deadline Guardian AI backend listening on http://localhost:${PORT}  |  AI mode: ${mode}`);
+  if (configured) {
+    console.log(`[server] Verify Gemini connectivity:  GET http://localhost:${PORT}/api/ai/test`);
+  }
 });

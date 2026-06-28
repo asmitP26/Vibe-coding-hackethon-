@@ -224,7 +224,7 @@ deterministic mock fallback, so the feature always works — with or without a k
 | **Charts** | Recharts 2 |
 | **Icons** | lucide-react |
 | **Backend** | Node.js + Express (secure Gemini proxy) |
-| **AI** | Google Gemini API (`gemini-1.5-flash`), called only from the backend |
+| **AI** | Google Gemini API (`gemini-2.5-flash`), called only from the backend |
 | **Voice** | Web Speech API (browser-native) |
 | **Persistence** | Browser `localStorage` (mock-data fallback) |
 | **State** | React Context + hooks |
@@ -233,7 +233,7 @@ deterministic mock fallback, so the feature always works — with or without a k
 
 | Technology | Role | Status |
 | --- | --- | --- |
-| **Google Gemini API** (`gemini-1.5-flash`) | Core AI reasoning — task analysis, planning, breakdown, rescheduling, coaching. | Live via secure backend proxy |
+| **Google Gemini API** (`gemini-2.5-flash`) | Core AI reasoning — task analysis, planning, breakdown, rescheduling, coaching. | Live via secure backend proxy |
 | **Google AI Studio** | API key provisioning and prompt prototyping. | In use for keys |
 | **Gemini Structured Output** | `responseMimeType: application/json` for strict, parseable JSON. | In use (server-side) |
 | **Google Calendar API** | Two-way sync of generated time blocks. | Planned |
@@ -306,8 +306,9 @@ flowchart TD
 The backend instructs Gemini to **return strict JSON only** (no markdown, no code fences) and
 embeds a sample schema as a one-shot example, so responses are predictable and directly renderable.
 The frontend always keeps a deterministic **mock fallback**, so the UI works even with no key or
-no backend reachable. The current AI mode is reported by `GET /api/ai/status` and shown in the
-in-app badge.
+no backend reachable. The current AI mode is reported by `GET /api/ai/status` (which reflects
+whether the *last real Gemini call actually succeeded*, not merely whether a key is present), and a
+one-shot connectivity probe is available at `GET /api/ai/test`. Both are shown in the in-app badge.
 
 ## Secure Backend
 
@@ -325,8 +326,9 @@ hardened surface in front of Google's API.
   internal details. Logs report only the AI *mode*, never secrets.
 - **Fails safe.** If the key is absent or Gemini is unreachable, every endpoint returns a
   deterministic **mock** in the same schema, so the app never crashes or hangs on the network.
-- **Status, not secrets.** `GET /api/ai/status` exposes only whether AI is live or mocked — which
-  the in-app badge reflects.
+- **Status, not secrets.** `GET /api/ai/status` exposes only `mode` (live/mock), `configured`,
+  the active `model`, and a safe `lastError` — never the key. `GET /api/ai/test` runs one tiny
+  live call to verify connectivity and returns `{ ok, mode, model, response | error }`.
 
 > SECURITY_NOTE: In production, inject `GEMINI_API_KEY` through your host's secret manager (e.g.
 > Google Cloud Run variables or Secret Manager) rather than a file on disk.
@@ -389,11 +391,17 @@ cp .env.example .env
 ```bash
 # .env  (read only by the backend server)
 GEMINI_API_KEY=your_google_ai_studio_key_here
+GEMINI_MODEL=gemini-2.5-flash
 PORT=3001
 ```
 
 Get a free key from **[Google AI Studio](https://aistudio.google.com/app/apikey)**, then restart
-`npm run dev`. The in-app badge switches to **“Gemini Live via Secure Backend”**.
+`npm run dev`. The in-app badge switches to **"Gemini Live via Secure Backend"**. `GEMINI_MODEL`
+is optional — it defaults to `gemini-2.5-flash` (the retired `gemini-1.5-flash` returns 404).
+
+To confirm the live connection, hit **`GET http://localhost:3001/api/ai/test`** — it makes one
+tiny Gemini call and returns `{ "ok": true, "mode": "live", "model": "...", "response": ... }`
+on success, or a safe `{ "ok": false, "mode": "mock", "error": "..." }` (HTTP 503) if it fails.
 
 > SECURITY_NOTE: The key is read only by the Express backend via `process.env.GEMINI_API_KEY` and
 > is **never** shipped to the browser. `.env` / `.env.local` are git-ignored — never hardcode or

@@ -12,7 +12,7 @@
 | --- | --- |
 | **Project Name** | Deadline Guardian AI |
 | **Category** | AI Productivity / Personal Assistant |
-| **Core AI** | Google Gemini (`gemini-1.5-flash`) via a secure backend proxy |
+| **Core AI** | Google Gemini (`gemini-2.5-flash`) via a secure backend proxy |
 | **One-liner** | An AI chief-of-staff that answers *"What should I do right now?"* |
 | **Status** | Working MVP — fully functional, responsive, production build passing |
 | **Tech** | React 18 · Vite 5 · Tailwind · Framer Motion · Node/Express · Gemini |
@@ -98,7 +98,7 @@ The deterministic engine guarantees the app is **always useful and instant**, wh
 | **Charts / Data Viz** | Recharts 2 |
 | **Icons** | lucide-react |
 | **Backend** | Node.js + Express (secure Gemini proxy) |
-| **AI** | Google Gemini API (`gemini-1.5-flash`) — called **only** from the backend |
+| **AI** | Google Gemini API (`gemini-2.5-flash`) — called **only** from the backend |
 | **Voice** | Web Speech API (browser-native, zero dependency) |
 | **State Management** | React Context + hooks (memoized for performance) |
 | **Persistence** | Browser `localStorage` with a safe mock-data fallback |
@@ -111,7 +111,7 @@ The deterministic engine guarantees the app is **always useful and instant**, wh
 
 | Technology | Role in the project | Status |
 | --- | --- | --- |
-| **Google Gemini API** (`gemini-1.5-flash`) | The core reasoning engine — powers task analysis, daily planning, task breakdown, rescheduling, coaching, and the context-aware Copilot. | **Live** via secure backend proxy |
+| **Google Gemini API** (`gemini-2.5-flash`) | The core reasoning engine — powers task analysis, daily planning, task breakdown, rescheduling, coaching, and the context-aware Copilot. | **Live** via secure backend proxy |
 | **Gemini Structured Output** | We request `responseMimeType: application/json` so Gemini returns strict, schema-conformant JSON that the UI can render directly — no fragile text parsing. | **In use** (server-side) |
 | **Google AI Studio** | API key provisioning and rapid prompt prototyping. | **In use** |
 | **Google Calendar API** | Two-way sync of AI-generated time blocks to the user's calendar. | Planned (roadmap) |
@@ -173,7 +173,7 @@ A clean separation across a **secure boundary** keeps the API key off the client
                   │ typed JSON result (score / plan / checklist / reply)                                  ▼
                   │                                                              ┌─────────────────────────────────┐
                   └──────────────────────────────────────────────────────────  │   GOOGLE GEMINI API             │
-                                                                                │   gemini-1.5-flash              │
+                                                                                │   gemini-2.5-flash              │
                                                                                 │   strict application/json output │
                                                                                 └─────────────────────────────────┘
 ```
@@ -192,35 +192,35 @@ A clean separation across a **secure boundary** keeps the API key off the client
 
 ## 8. Screenshots
 
-> *Replace each placeholder below with a screenshot. Suggested captions are provided for judges.*
+> Every screen runs on realistic demo data, so the product looks "live" the moment it opens. The AI-mode badge — **"Mock AI Mode"** without a key, **"Gemini Live via Secure Backend"** with one — is visible in the top bar of every screen.
 
 ### 📸 Screenshot 1 — Landing Page
-*[ Paste screenshot here ]*
+![Deadline Guardian AI — landing page](docs/screenshots/landing.png)
 **Caption:** The premium, glassmorphism landing page introducing Deadline Guardian AI.
 
 ### 📸 Screenshot 2 — Dashboard (AI Command Center)
-*[ Paste screenshot here ]*
+![Dashboard — the AI command center](docs/screenshots/dashboard.png)
 **Caption:** The bento-grid dashboard — Daily Brief, Deadline Risk Radar, Productivity Score, Top Priority Tasks, and Habit Tracker at a glance.
 
 ### 📸 Screenshot 3 — Tasks with Priority & Risk
-*[ Paste screenshot here ]*
+![Tasks — AI-prioritized and risk-aware](docs/screenshots/tasks.png)
 **Caption:** Every task scored 0–100 and color-coded by deadline risk (Critical → Safe).
 
 ### 📸 Screenshot 4 — AI Planner (Time-Blocked Day)
-*[ Paste screenshot here ]*
+![AI Planner — a focus-first, time-blocked day](docs/screenshots/planner.png)
 **Caption:** A Gemini-generated, focus-optimized daily schedule with one-click Auto-Replan.
 
 ### 📸 Screenshot 5 — Personalized Insights
-*[ Paste screenshot here ]*
+![Insights — productivity analytics and AI coaching](docs/screenshots/insights.png)
 **Caption:** Completion rate, missed ratio, most productive time, AI coaching, and a 7-day Weekly Report.
 
 ### 📸 Screenshot 6 — Productivity Copilot (Context-Aware Chat)
-*[ Paste screenshot here ]*
+![Productivity Copilot — context-aware AI chat](docs/screenshots/assistant.png)
 **Caption:** The Copilot reasoning over live tasks and schedule, answering "What should I do right now?" with structured cards and voice input.
 
-### 📸 Screenshot 7 — "Gemini Live via Secure Backend" Badge
-*[ Paste screenshot here ]*
-**Caption:** The live AI-mode indicator, proving the secure proxy architecture in action.
+### 📸 Screenshot 7 — Habit Tracker (Streaks & Goals)
+![Habit Tracker — streaks and daily goals](docs/screenshots/habits.png)
+**Caption:** Streak-based habit tracking with weekly progress and daily goals — the routines that prevent future crunches.
 
 ---
 

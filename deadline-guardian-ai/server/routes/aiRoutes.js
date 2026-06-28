@@ -17,8 +17,9 @@ import {
   rescheduleTasksOnServer,
   getProductivityCoachingOnServer,
   chatWithCopilotOnServer,
-  getAIMode,
   isGeminiConfigured,
+  getGeminiHealth,
+  runGeminiTest,
 } from '../services/geminiServerService.js';
 
 const router = Router();
@@ -52,13 +53,33 @@ function requireObjectBody(req, res) {
 
 // --- Status -------------------------------------------------------------------
 // GET /api/ai/status -> drives the frontend "AI mode" badge.
+// `mode` is "live" ONLY when a key is configured AND the most recent Gemini
+// call succeeded; it drops to "mock" if the key is missing OR the last call
+// failed. `lastError` is a safe, key-free message when the last call failed.
 router.get('/status', (req, res) => {
+  const health = getGeminiHealth();
   res.json({
-    mode: getAIMode(), // "live" | "mock"
+    mode: health.mode, // "live" | "mock"
+    configured: health.configured, // boolean: a real key is present
     provider: 'Google Gemini',
+    model: health.model,
     secureProxy: true,
+    lastError: health.lastError, // safe message | null
+    lastCheckedAt: health.lastCheckedAt, // ISO string | null
   });
 });
+
+// --- Test ---------------------------------------------------------------------
+// GET /api/ai/test -> lightweight end-to-end connectivity probe. Makes ONE tiny
+// Gemini call and reports whether the live path actually works. Useful for
+// diagnosing 404 / wrong-model / quota issues without exposing secrets.
+router.get(
+  '/test',
+  safeHandler(async (req, res) => {
+    const result = await runGeminiTest();
+    res.status(result.ok ? 200 : 503).json(result);
+  }),
+);
 
 // --- POST /api/ai/analyze-task ------------------------------------------------
 router.post(

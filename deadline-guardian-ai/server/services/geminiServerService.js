@@ -25,8 +25,21 @@ import { safeParseJSON, isPlainObject, withFallbackShape } from '../utils/safeJs
 // ============================================================================
 const PLACEHOLDER_KEYS = ['<REPLACE_ME>', 'your_google_ai_studio_key_here', 'your_key_here'];
 
-export const GEMINI_MODEL = 'gemini-1.5-flash';
+// Default to a current, supported model. `gemini-1.5-flash` was retired on the
+// public v1beta endpoint and returns 404, which is the root cause of the
+// "Gemini request failed: 404 Not Found" fallback loop. The model is
+// overridable via GEMINI_MODEL so deployments can pin a specific version.
+const DEFAULT_GEMINI_MODEL = 'gemini-2.5-flash';
 export const GEMINI_API_BASE = 'https://generativelanguage.googleapis.com/v1beta';
+
+/** The active model name (env override -> sensible default). */
+export function getGeminiModel() {
+  const m = process.env.GEMINI_MODEL;
+  return typeof m === 'string' && m.trim() ? m.trim() : DEFAULT_GEMINI_MODEL;
+}
+
+// Back-compat export; some modules import GEMINI_MODEL directly.
+export const GEMINI_MODEL = getGeminiModel();
 
 /** Read the key fresh each call so env changes are picked up without caching. */
 function getApiKey() {
@@ -40,9 +53,54 @@ export function isGeminiConfigured() {
   return key.length > 0 && !PLACEHOLDER_KEYS.includes(key);
 }
 
-/** Current AI mode: "live" when a key is configured, otherwise "mock". */
+// ----------------------------------------------------------------------------
+// LIVE HEALTH STATE - tracks whether real Gemini calls are actually working, so
+// the "AI mode" badge reflects reality instead of merely "a key is present".
+//   - configured: a real key is set.
+//   - mode: "live" only after a successful call; "mock" if no key OR the last
+//     call failed (so a wrong model / quota / network issue is surfaced).
+//   - lastError: a SAFE, key-free message from the most recent failure.
+// ----------------------------------------------------------------------------
+const geminiHealth = {
+  lastOk: null, // boolean | null (null = no call attempted yet this process)
+  lastError: null, // safe string | null
+  lastCheckedAt: null, // ISO string | null
+};
+
+function recordGeminiSuccess() {
+  geminiHealth.lastOk = true;
+  geminiHealth.lastError = null;
+  geminiHealth.lastCheckedAt = new Date().toISOString();
+}
+
+function recordGeminiFailure(message) {
+  geminiHealth.lastOk = false;
+  geminiHealth.lastError = typeof message === 'string' && message ? message : 'unknown error';
+  geminiHealth.lastCheckedAt = new Date().toISOString();
+}
+
+/**
+ * Current AI mode for the badge / status endpoint.
+ *   - "mock" when no key is configured.
+ *   - "mock" when the most recent live call FAILED (lastOk === false).
+ *   - "live" when configured and the last call succeeded (or none has run yet,
+ *     which is the optimistic default until the first request resolves).
+ */
 export function getAIMode() {
-  return isGeminiConfigured() ? 'live' : 'mock';
+  if (!isGeminiConfigured()) return 'mock';
+  return geminiHealth.lastOk === false ? 'mock' : 'live';
+}
+
+/** Detailed, key-free health snapshot used by GET /api/ai/status and /test. */
+export function getGeminiHealth() {
+  return {
+    configured: isGeminiConfigured(),
+    mode: getAIMode(),
+    model: getGeminiModel(),
+    lastOk: geminiHealth.lastOk,
+    lastError: geminiHealth.lastError,
+    lastCheckedAt: geminiHealth.lastCheckedAt,
+  };
 }
 
 // ============================================================================
@@ -333,7 +391,8 @@ const diffHours = (start, end) => {
  * is never logged or returned to the client.
  */
 async function callGemini(prompt, signal) {
-  const res = await fetch(`${GEMINI_API_BASE}/models/${GEMINI_MODEL}:generateContent`, {
+  const model = getGeminiModel();
+  const res = await fetch(`${GEMINI_API_BASE}/models/${model}:generateContent`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -341,17 +400,28 @@ async function callGemini(prompt, signal) {
     },
     body: JSON.stringify({
       contents: [{ role: 'user', parts: [{ text: prompt }] }],
-      generationConfig: { responseMimeType: 'application/json', temperature: 0.7 },
+      generationConfig: { responseMimeType: 'application/json', temperature: 0.4 },
     }),
     signal,
   });
 
   if (!res.ok) {
-    // Log only safe status info - never the key or response body that may echo input.
-    throw new Error(`Gemini request failed: ${res.status} ${res.statusText}`);
+    // Surface the real reason (status + Google's message + model) so a wrong
+    // model name, expired key, or quota issue is diagnosable from the logs -
+    // WITHOUT ever logging the API key.
+    let detail = '';
+    try {
+      const errBody = await res.json();
+      detail = errBody?.error?.message || errBody?.error?.status || '';
+    } catch {
+      /* body was not JSON; keep status text only */
+    }
+    const suffix = detail ? ` - ${detail}` : '';
+    throw new Error(`Gemini request failed: ${res.status} ${res.statusText} [model=${model}]${suffix}`);
   }
 
   const data = await res.json();
+  // A blocked / empty candidate has no text; treat that as a failure to parse.
   return data?.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
 }
 
@@ -361,7 +431,8 @@ async function callGemini(prompt, signal) {
  *   - Key configured     -> calls Gemini, requests JSON-only output, parses it
  *     safely, backfills missing fields from `fallbackData`.
  * NEVER throws: any network / parse error is logged with a SAFE message and
- * `fallbackData` is returned.
+ * `fallbackData` is returned. Records live health so GET /api/ai/status can
+ * report whether real calls are actually succeeding.
  *
  * @param {string} prompt        Fully-built prompt (template + INPUT).
  * @param {object} fallbackData  Deterministic mock used when AI is off or fails.
@@ -377,14 +448,61 @@ export async function generateJSON(prompt, fallbackData) {
     const text = await callGemini(prompt, controller.signal);
     const parsed = safeParseJSON(text, null);
     if (parsed == null) {
-      console.warn('[geminiServerService] Gemini returned unparseable JSON - using fallback data.');
+      recordGeminiFailure('Gemini returned unparseable or empty JSON');
+      console.warn(`[geminiServerService] Gemini returned unparseable JSON [model=${getGeminiModel()}] - using fallback data.`);
       return fallbackData;
     }
+    recordGeminiSuccess();
     return withFallbackShape(parsed, fallbackData);
   } catch (error) {
     // Safe message only - never log the key or full user payload.
-    console.warn(`[geminiServerService] Gemini request failed - using fallback data. (${error?.message || 'unknown error'})`);
+    const message = error?.name === 'AbortError'
+      ? `Gemini request timed out after ${REQUEST_TIMEOUT_MS}ms [model=${getGeminiModel()}]`
+      : (error?.message || 'unknown error');
+    recordGeminiFailure(message);
+    console.warn(`[geminiServerService] Gemini request failed - using fallback data. (${message})`);
     return fallbackData;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Lightweight end-to-end connectivity probe for GET /api/ai/test.
+ * Makes ONE tiny Gemini call and reports success/failure with a safe,
+ * key-free message. Updates the shared health state as a side effect.
+ *
+ * @returns {Promise<{ ok: boolean, mode: string, model: string, response?: any, error?: string }>}
+ */
+export async function runGeminiTest() {
+  const model = getGeminiModel();
+  if (!isGeminiConfigured()) {
+    return {
+      ok: false,
+      mode: 'mock',
+      model,
+      error: 'No GEMINI_API_KEY configured on the server (running in mock mode).',
+    };
+  }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  try {
+    const prompt = 'Return JSON only: {"ok": true, "message": "Gemini connected"}';
+    const text = await callGemini(prompt, controller.signal);
+    const parsed = safeParseJSON(text, null);
+    if (parsed == null) {
+      recordGeminiFailure('Gemini returned unparseable or empty JSON');
+      return { ok: false, mode: 'mock', model, error: 'Gemini returned unparseable or empty JSON.' };
+    }
+    recordGeminiSuccess();
+    return { ok: true, mode: 'live', model, response: parsed };
+  } catch (error) {
+    const message = error?.name === 'AbortError'
+      ? `Gemini request timed out after ${REQUEST_TIMEOUT_MS}ms`
+      : (error?.message || 'unknown error');
+    recordGeminiFailure(message);
+    return { ok: false, mode: 'mock', model, error: message };
   } finally {
     clearTimeout(timer);
   }
@@ -663,5 +781,9 @@ export async function chatWithCopilotOnServer(payload = {}) {
   const prompt = buildPrompt(ASSISTANT_CHAT_PROMPT, input);
   const result = await generateJSON(prompt, { reply: null, intent });
   const reply = result && typeof result.reply === 'string' && result.reply.trim() ? result.reply.trim() : null;
-  return { reply, intent, mode: 'live' };
+  // Report the REAL mode: if the live call failed, generateJSON returned the
+  // fallback (reply: null) and health is now "mock" - tell the client so the UI
+  // can indicate a mock/fallback response instead of claiming "live".
+  const mode = getAIMode();
+  return { reply, intent, mode };
 }
