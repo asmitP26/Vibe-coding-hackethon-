@@ -13,6 +13,9 @@
     "start": "node server/index.js",
     "lint": "eslint ."
   },
+  "engines": {
+    "node": ">=18"
+  },
   "dependencies": {
     "autoprefixer": "^10.5.2",
     "cors": "^2.8.5",

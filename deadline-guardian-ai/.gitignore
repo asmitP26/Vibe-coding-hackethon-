@@ -10,7 +10,9 @@ dist-ssr
 
 # Environment / secrets - never commit real keys
 .env
+.env.local
 .env.*
+*.env
 !.env.example
 
 # Logs

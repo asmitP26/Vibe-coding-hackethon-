@@ -391,13 +391,13 @@ cp .env.example .env
 ```bash
 # .env  (read only by the backend server)
 GEMINI_API_KEY=your_google_ai_studio_key_here
-GEMINI_MODEL=gemini-2.5-flash
+GEMINI_MODEL=gemini-2.5-flash-lite
 PORT=3001
 ```
 
 Get a free key from **[Google AI Studio](https://aistudio.google.com/app/apikey)**, then restart
 `npm run dev`. The in-app badge switches to **"Gemini Live via Secure Backend"**. `GEMINI_MODEL`
-is optional — it defaults to `gemini-2.5-flash` (the retired `gemini-1.5-flash` returns 404).
+is optional — it defaults to `gemini-2.5-flash-lite` (the retired `gemini-1.5-flash` returns 404).
 
 To confirm the live connection, hit **`GET http://localhost:3001/api/ai/test`** — it makes one
 tiny Gemini call and returns `{ "ok": true, "mode": "live", "model": "...", "response": ... }`
@@ -410,48 +410,45 @@ on success, or a safe `{ "ok": false, "mode": "mock", "error": "..." }` (HTTP 50
 
 ## Deployment
 
-The app is a static **frontend** plus a small **Node/Express backend**. The recommended split is
-Firebase Hosting (frontend) + Cloud Run (backend), but any static host paired with a Node host works.
+Deadline Guardian AI deploys as **one full-stack service**: the Express backend serves the built
+React frontend from `dist/` **and** handles the `/api/*` routes on the same origin. There is no
+separate frontend host and **no Vite dev server in production**.
 
-**1. Build the frontend**
+### Google Cloud Run / AI Studio
 
-```bash
-npm run build      # optimized static bundle -> dist/
-npm run preview    # optional: smoke-test the production build locally
-```
+1. **Add server-side environment variables** (the key stays on the server, never in the browser):
 
-**2. Deploy the backend (it holds the key)**
+   | Variable | Value |
+   | --- | --- |
+   | `GEMINI_API_KEY` | your Google AI Studio key |
+   | `GEMINI_MODEL` | `gemini-2.5-flash-lite` |
 
-```bash
-# Example: Google Cloud Run
-gcloud run deploy deadline-guardian-api \
-  --source server \
-  --set-env-vars GEMINI_API_KEY=YOUR_KEY,CLIENT_ORIGIN=https://your-frontend-url \
-  --allow-unauthenticated
-```
+2. **Build command:** `npm run build` — produces the static frontend in `dist/`.
+3. **Start command:** `npm start` — Express serves `dist/` **and** the `/api` routes.
 
-- Pull `GEMINI_API_KEY` from your host's **secret manager** — never commit it.
-- Set `CLIENT_ORIGIN` to your deployed frontend URL so CORS allows it.
-- The server listens on `PORT` (defaults to `3001`; Cloud Run injects its own `PORT`).
+No code changes are needed after upload. Cloud Run injects its own `PORT`; the server respects
+`process.env.PORT` (defaulting to `8080`).
 
-**3. Deploy the frontend**
+> The Gemini API key is read only by the Express backend via `process.env.GEMINI_API_KEY` and is
+> **never** exposed in frontend code. Inject it through Cloud Run env vars or Secret Manager.
+
+### Verify a deployment
 
 ```bash
-# Example: Firebase Hosting
-firebase deploy --only hosting
+npm install
+npm run build
+npm start
 ```
 
-- Point the frontend's `/api` calls at the backend URL (a Hosting rewrite or a `VITE_API_BASE`
-  env var) so production traffic reaches the backend.
+Then check:
 
-**4. Verify**
+- **`http://localhost:8080`** — the React app loads (no Vite dev logs).
+- **`http://localhost:8080/health`** — `{ "ok": true, "service": "Deadline Guardian AI", "mode": "production-ready" }`.
+- **`http://localhost:8080/api/ai/status`** — reports `live` (with a key) or `mock` (without).
+- Deep links like `/dashboard`, `/assistant`, `/planner` load and survive a refresh (no 404).
 
-- Open the site and confirm the AI badge reads **Gemini Live via Secure Backend** (or **Mock AI
-  Mode** if you deployed without a key).
-- Call `GET https://your-backend-url/api/ai/status` — it should report the live/mock mode.
-
-> SECURITY_NOTE: Always serve over **HTTPS**, keep the key in a secret manager, and restrict
-> `CLIENT_ORIGIN` to your real frontend domain.
+> Optional: if you instead run the frontend on a separate origin, set `CLIENT_ORIGIN` to that
+> origin so CORS allows it. The single-service model above needs no CORS configuration.
 
 ## Demo Flow
 

@@ -29,7 +29,7 @@ const PLACEHOLDER_KEYS = ['<REPLACE_ME>', 'your_google_ai_studio_key_here', 'you
 // public v1beta endpoint and returns 404, which is the root cause of the
 // "Gemini request failed: 404 Not Found" fallback loop. The model is
 // overridable via GEMINI_MODEL so deployments can pin a specific version.
-const DEFAULT_GEMINI_MODEL = 'gemini-2.5-flash';
+const DEFAULT_GEMINI_MODEL = 'gemini-2.5-flash-lite';
 export const GEMINI_API_BASE = 'https://generativelanguage.googleapis.com/v1beta';
 
 /** The active model name (env override -> sensible default). */
