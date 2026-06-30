@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <!--
+      Defensive startup guard for sandboxed preview hosts (e.g. Google AI Studio)
+      that proxy network access by reassigning window.fetch. Some of those hosts
+      first define window.fetch as a getter-only property, so a later
+      `window.fetch = ...` throws "Cannot set property fetch of #<Window> which
+      has only a getter" and the React app never mounts (blank white screen).
+      We restore window.fetch to a normal, assignable property so any such
+      reassignment succeeds harmlessly. Native fetch behavior is unchanged - the
+      guard does NOT intercept, wrap, proxy, or log any request. It runs before
+      the app bundle and can never break startup (wrapped in try/catch). This is
+      the only place the app touches window.fetch, and only to keep it writable.
+    -->
+    <script>
+      (function () {
+        try {
+          var current =
+            typeof window.fetch === 'function' ? window.fetch.bind(window) : window.fetch;
+          Object.defineProperty(window, 'fetch', {
+            configurable: true,
+            enumerable: true,
+            get: function () {
+              return current;
+            },
+            set: function (next) {
+              // Accept reassignment instead of throwing; ignore non-functions so
+              // a bad override can never disable fetch for the app.
+              if (typeof next === 'function') current = next;
+            },
+          });
+        } catch (e) {
+          /* Never let the guard itself break app startup. */
+        }
+      })();
+    </script>
+    <link rel="icon" type="image/svg+xml" href="/shield.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#2563eb" />
+    <meta
+      name="description"
+      content="Deadline Guardian AI - your proactive AI companion that plans, prioritizes, reminds, and helps you finish before deadlines."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <title>Deadline Guardian AI</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>
